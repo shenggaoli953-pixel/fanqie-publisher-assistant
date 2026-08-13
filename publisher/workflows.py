@@ -39,6 +39,19 @@ class ShortStoryRunReport:
     requires_user_action: bool = False
 
 
+@dataclass(frozen=True)
+class ShortStoryQueueReport:
+    submitted_names: tuple[str, ...]
+    skipped_names: tuple[str, ...]
+    failed_name: str | None = None
+    error: str | None = None
+    requires_user_action: bool = False
+
+    @property
+    def success(self) -> bool:
+        return self.failed_name is None and self.error is None
+
+
 def sync_novel_status(service, gateway, book_id: str) -> SyncReport:
     book = service.get_book(book_id)
     gateway.launch()
@@ -192,3 +205,43 @@ def publish_short_story(
             replace(config, remote_draft_url=result.draft_url)
         )
     return ShortStoryRunReport(False, result.error or "短故事发布失败")
+
+
+def publish_all_short_stories(
+    service,
+    gateway,
+    *,
+    publisher_factory=ShortStoryPublisher,
+    on_progress: Callable[[str], None] | None = None,
+) -> ShortStoryQueueReport:
+    progress = on_progress or (lambda _message: None)
+    publisher = publisher_factory(gateway)
+    progress("正在同步番茄已发布短故事")
+    published_titles = publisher.published_titles()
+    submitted: list[str] = []
+    skipped: list[str] = []
+
+    for config in service.list_short_stories():
+        if config.name in published_titles:
+            skipped.append(config.name)
+            continue
+        progress(f"正在发布短故事：{config.name}")
+        report = publish_short_story(
+            service,
+            gateway,
+            config.story_id,
+            publisher_factory=lambda _gateway: publisher,
+        )
+        if report.success:
+            submitted.append(config.name)
+            published_titles.add(config.name)
+            continue
+        return ShortStoryQueueReport(
+            tuple(submitted),
+            tuple(skipped),
+            failed_name=config.name,
+            error=report.message,
+            requires_user_action=report.requires_user_action,
+        )
+
+    return ShortStoryQueueReport(tuple(submitted), tuple(skipped))

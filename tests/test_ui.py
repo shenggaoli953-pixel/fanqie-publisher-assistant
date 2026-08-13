@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from publisher.browser import PreflightResult, PreflightStatus, SubmissionResult
 from publisher.models import BookConfig, Chapter, PublishMode, RemoteChapter, ScheduledDay
-from publisher.workflows import ShortStoryRunReport
+from publisher.workflows import ShortStoryQueueReport
 from publisher.ui import (
     PublisherApp,
     _SHORT_STORY_CATEGORIES,
@@ -45,10 +45,7 @@ class UiFormattingTests(unittest.TestCase):
             app._update_story_preview()
 
         self.assertEqual(app._story_category_var.get(), "婚姻家庭")
-        self.assertEqual(
-            app._story_extra_var.get(),
-            "家庭、婚恋、虐文、婆媳、打脸逆袭、现代",
-        )
+        self.assertEqual(app._story_extra_var.get(), "家庭、婚恋")
 
     def test_short_story_extra_categories_can_be_added_and_removed(self):
         class Service:
@@ -170,9 +167,14 @@ class UiFormattingTests(unittest.TestCase):
         app = PublisherApp(root, Service(), object())
         app._selected_story_id = "story-1"
         app._save_short_story = lambda: True
-        app._load_short_story = lambda _story_id: None
+        app._refresh_short_stories = lambda: None
         app._start_task = lambda _label, _operation, done: done(
-            ShortStoryRunReport(False, "Locator.click: Timeout 30000ms exceeded.")
+            ShortStoryQueueReport(
+                (),
+                (),
+                failed_name="夜航",
+                error="Locator.click: Timeout 30000ms exceeded.",
+            )
         )
 
         with patch("publisher.ui.messagebox.showerror") as show_error:

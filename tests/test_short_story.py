@@ -13,7 +13,7 @@ from publisher.short_story import (
 
 
 class ShortStoryTests(unittest.TestCase):
-    def test_suggest_categories_returns_a_full_relevant_tag_set(self):
+    def test_suggest_categories_keeps_only_the_central_relevant_tags(self):
         primary, extras = suggest_short_story_categories(
             "离婚九年，前夫要收回儿子的房子",
             "离婚九年后，前夫带着律师找上门，要收回留给儿子的房子。"
@@ -21,11 +21,18 @@ class ShortStoryTests(unittest.TestCase):
         )
 
         self.assertEqual(primary, "婚姻家庭")
-        self.assertEqual(
-            extras,
-            ("家庭", "婚恋", "虐文", "婆媳", "打脸逆袭", "现代"),
-        )
+        self.assertEqual(extras, ("家庭", "婚恋"))
         self.assertLessEqual(len(extras), 7)
+
+    def test_suggest_categories_does_not_promote_incidental_setting_words(self):
+        primary, extras = suggest_short_story_categories(
+            "离婚后，前夫送儿子去医院",
+            "前夫带儿子去医院复查，医生说只是普通感冒。"
+            "我在公司请了半天假，陪孩子回家休息。",
+        )
+
+        self.assertEqual(primary, "婚姻家庭")
+        self.assertEqual(extras, ("婚恋", "家庭"))
 
     def test_suggest_categories_does_not_treat_a_family_home_as_urban_life(self):
         primary, extras = suggest_short_story_categories(
@@ -35,7 +42,7 @@ class ShortStoryTests(unittest.TestCase):
         )
 
         self.assertEqual(primary, "婚姻家庭")
-        self.assertEqual(extras, ("家庭", "婚恋", "虐文"))
+        self.assertEqual(extras, ("家庭", "婚恋"))
 
     def test_config_rejects_a_second_primary_category_as_an_extra(self):
         with self.assertRaisesRegex(ValueError, "附加分类不能使用主分类"):

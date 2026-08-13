@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from html import escape
 from pathlib import Path
 import re
+from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 from publisher.browser import (
     EdgePublisherGateway,
@@ -19,6 +20,7 @@ from publisher.short_story import (
 _NEW_STORY_URL = (
     "https://fanqienovel.com/main/writer/publish-short/?enter_from=NEWCHAPTER_1"
 )
+_SHORT_STORY_MANAGER_URL = "https://fanqienovel.com/main/writer/short-manage/"
 _DRAFT_URL = re.compile(
     r"^https://fanqienovel\.com/main/writer/publish-short/\d+(?:\?.*)?$"
 )
@@ -88,6 +90,25 @@ class ShortStoryPublisher:
     def __init__(self, gateway: EdgePublisherGateway) -> None:
         self._gateway = gateway
 
+    def published_titles(self) -> set[str]:
+        self._gateway.launch()
+        page = self._gateway.current_page
+        try:
+            with page.expect_response(
+                lambda response: "/api/author/short_article/list/v0/"
+                in response.url,
+                timeout=10000,
+            ) as response_info:
+                page.goto(_SHORT_STORY_MANAGER_URL, wait_until="domcontentloaded")
+            return self._published_titles_from_api(
+                page.context.request,
+                response_info.value.url,
+                response_info.value.json(),
+            )
+        except Exception:
+            page.wait_for_timeout(1800)
+        return self._published_titles(page)
+
     def submit(self, config: ShortStoryConfig) -> ShortStorySubmissionResult:
         validate_short_story_config(config)
         draft = scan_short_story_source(config.source_path)
@@ -125,6 +146,68 @@ class ShortStoryPublisher:
             raise ValueError("番茄短故事发布前必须设置试读位置")
         if not config.consent_confirmed:
             raise ValueError("请先勾选已阅读番茄短故事发布事项")
+
+    @staticmethod
+    def _published_titles(page) -> set[str]:
+        rows = page.locator(".short-article-item")
+        published: set[str] = set()
+        for index in range(rows.count()):
+            row = rows.nth(index)
+            if "已发布" not in row.inner_text():
+                continue
+            title = row.locator(".article-item-title").last
+            if title.count():
+                value = title.inner_text().strip()
+                if value:
+                    published.add(value)
+        return published
+
+    @staticmethod
+    def _published_titles_from_api(
+        request, first_url: str, first_payload: object
+    ) -> set[str]:
+        parsed = urlsplit(first_url)
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        page_count = max(1, int(query.get("page_count", ["10"])[0]))
+        titles: set[str] = set()
+        total_count: int | None = None
+        page_index = 0
+        while total_count is None or page_index * page_count < total_count:
+            if page_index == 0:
+                payload = first_payload
+            else:
+                query["page_index"] = [str(page_index)]
+                url = urlunsplit(
+                    (
+                        parsed.scheme,
+                        parsed.netloc,
+                        parsed.path,
+                        urlencode(query, doseq=True),
+                        "",
+                    )
+                )
+                payload = request.get(url, timeout=10000).json()
+            if not isinstance(payload, dict) or payload.get("code") != 0:
+                raise PublishBlockedError("短故事后台列表接口返回异常")
+            data = payload.get("data")
+            if not isinstance(data, dict):
+                raise PublishBlockedError("短故事后台列表缺少数据")
+            total_count = int(data.get("total_count", 0))
+            items = data.get("item_list")
+            if not isinstance(items, list):
+                raise PublishBlockedError("短故事后台列表格式异常")
+            for item in items:
+                if not isinstance(item, dict) or item.get("display_status") != 1:
+                    continue
+                titles.update(
+                    str(title).strip()
+                    for title in item.get("multi_title", ())
+                    if str(title).strip()
+                )
+            if not items:
+                break
+            page_index += 1
+        return titles
 
     @staticmethod
     def _open_draft(page, saved_url: str | None) -> str:

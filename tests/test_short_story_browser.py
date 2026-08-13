@@ -986,6 +986,137 @@ class ShortStoryBrowserTests(unittest.TestCase):
             "<p>第一段&lt;&amp;</p><p>第二段</p>",
         )
 
+    def test_published_titles_reads_only_manager_items_tagged_as_published(self):
+        class Title:
+            def __init__(self, value: str) -> None:
+                self.value = value
+
+            @property
+            def last(self):
+                return self
+
+            def count(self) -> int:
+                return 1
+
+            def inner_text(self) -> str:
+                return self.value
+
+        class Row:
+            def __init__(self, title: str, status: str) -> None:
+                self.title = Title(title)
+                self.status = status
+
+            def locator(self, selector: str):
+                assert selector == ".article-item-title"
+                return self.title
+
+            def inner_text(self) -> str:
+                return f"{self.title.value}\n{self.status}\n分类"
+
+        class Rows:
+            def __init__(self) -> None:
+                self.items = (
+                    Row("已发布故事", "已发布"),
+                    Row("草稿故事", "草稿箱"),
+                    Row("审核故事", "审核中"),
+                )
+
+            def count(self) -> int:
+                return len(self.items)
+
+            def nth(self, index: int):
+                return self.items[index]
+
+        class Page:
+            def __init__(self) -> None:
+                self.rows = Rows()
+
+            def locator(self, selector: str):
+                assert selector == ".short-article-item"
+                return self.rows
+
+            def evaluate(self, _script: str) -> None:
+                pass
+
+            def wait_for_timeout(self, _milliseconds: int) -> None:
+                pass
+
+        self.assertEqual(
+            ShortStoryPublisher._published_titles(Page()),
+            {"已发布故事"},
+        )
+
+    def test_published_titles_from_api_reads_every_page(self):
+        class Response:
+            def __init__(self, payload) -> None:
+                self.payload = payload
+
+            def json(self):
+                return self.payload
+
+        class Request:
+            def __init__(self) -> None:
+                self.urls: list[str] = []
+
+            def get(self, url: str, *, timeout: int):
+                self.urls.append(url)
+                assert timeout == 10000
+                page_index = "page_index=1" in url
+                return Response(
+                    {
+                        "code": 0,
+                        "data": {
+                            "total_count": 3,
+                            "item_list": (
+                                [
+                                    {
+                                        "multi_title": ["第一页已发布"],
+                                        "display_status": 1,
+                                    },
+                                    {
+                                        "multi_title": ["第一页草稿"],
+                                        "display_status": 0,
+                                    },
+                                ]
+                                if not page_index
+                                else [
+                                    {
+                                        "multi_title": ["第二页已发布"],
+                                        "display_status": 1,
+                                    }
+                                ]
+                            ),
+                        },
+                    }
+                )
+
+        request = Request()
+        first_payload = {
+            "code": 0,
+            "data": {
+                "total_count": 3,
+                "item_list": [
+                    {
+                        "multi_title": ["第一页已发布"],
+                        "display_status": 1,
+                    },
+                    {
+                        "multi_title": ["第一页草稿"],
+                        "display_status": 0,
+                    },
+                ],
+            },
+        }
+        self.assertEqual(
+            ShortStoryPublisher._published_titles_from_api(
+                request,
+                "https://fanqienovel.com/api/author/short_article/list/v0/?page_count=2&page_index=0",
+                first_payload,
+            ),
+            {"第一页已发布", "第二页已发布"},
+        )
+        self.assertEqual(len(request.urls), 1)
+
     def test_story_validation_stops_before_browser_when_body_exceeds_platform_limit(self):
         draft = ShortStoryDraft(
             title="夜航",

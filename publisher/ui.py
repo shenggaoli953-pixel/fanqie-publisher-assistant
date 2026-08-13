@@ -23,8 +23,10 @@ from publisher.short_story import (
 )
 from publisher.workflows import (
     PublishRunReport,
+    ShortStoryQueueReport,
     ShortStoryRunReport,
     publish_all_scheduled,
+    publish_all_short_stories,
     publish_short_story,
     sync_novel_status,
 )
@@ -1106,7 +1108,7 @@ class PublisherApp:
         ).pack(side="left", padx=(8, 0))
         self._story_publish_button = ttk.Button(
             actions,
-            text="发布短故事",
+            text="发布全部未发布短故事",
             command=self._start_publish_short_story,
             style="Primary.TButton",
         )
@@ -1451,32 +1453,55 @@ class PublisherApp:
     def _start_publish_short_story(self) -> None:
         if not self._save_short_story() or self._selected_story_id is None:
             return
-        story_id = self._selected_story_id
 
-        def operation() -> ShortStoryRunReport:
+        def operation() -> ShortStoryQueueReport:
             gateway = self._make_gateway()
             try:
-                return publish_short_story(
+                return publish_all_short_stories(
                     self._service,
                     gateway,
-                    story_id,
+                    on_progress=lambda message: self._task_events.put(
+                        ("progress", message)
+                    ),
                 )
             finally:
                 self._close_gateway(gateway)
 
-        def done(report: ShortStoryRunReport) -> None:
-            self._load_short_story(story_id)
+        def done(report: ShortStoryQueueReport) -> None:
+            self._refresh_short_stories()
             if report.success:
-                self._task_status_var.set("短故事已提交到番茄后台")
-                messagebox.showinfo("发布完成", report.message, parent=self._root)
+                if report.submitted_names:
+                    self._task_status_var.set(
+                        f"短故事发布完成，共提交 {len(report.submitted_names)} 篇"
+                    )
+                    messagebox.showinfo(
+                        "发布完成",
+                        f"已连续提交 {len(report.submitted_names)} 篇短故事。"
+                        + (
+                            f"\n已跳过后台已发布的 {len(report.skipped_names)} 篇。"
+                            if report.skipped_names
+                            else ""
+                        ),
+                        parent=self._root,
+                    )
+                else:
+                    self._task_status_var.set("短故事后台已是最新状态")
             elif report.requires_user_action:
                 self._task_status_var.set("等待在 Edge 完成设置")
-                messagebox.showwarning("需要在 Edge 完成一次设置", report.message, parent=self._root)
+                messagebox.showwarning(
+                    "需要在 Edge 完成一次设置",
+                    f"《{report.failed_name}》：{report.error}",
+                    parent=self._root,
+                )
             else:
                 self._task_status_var.set("短故事发布未完成")
-                messagebox.showerror("短故事发布未完成", report.message, parent=self._root)
+                messagebox.showerror(
+                    "短故事发布未完成",
+                    f"《{report.failed_name}》：{report.error}",
+                    parent=self._root,
+                )
 
-        self._start_task("正在准备短故事", operation, done)
+        self._start_task("正在准备短故事队列", operation, done)
 
     def _refresh_books(self) -> None:
         self._books = self._service.list_books()

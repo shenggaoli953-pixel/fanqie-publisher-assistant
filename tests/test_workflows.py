@@ -12,6 +12,7 @@ from publisher.short_story_browser import (
 )
 from publisher.workflows import (
     publish_all_scheduled,
+    publish_all_short_stories,
     publish_short_story,
     sync_novel_status,
 )
@@ -310,6 +311,121 @@ class WorkflowTests(unittest.TestCase):
 
         self.assertTrue(report.success)
         self.assertIsNone(service.config.remote_draft_url)
+
+    def test_short_story_queue_skips_remote_published_titles_and_submits_the_rest_in_order(self):
+        stories = [
+            ShortStoryConfig(
+                story_id="story-1",
+                name="已发布故事",
+                source_path=Path("1.txt"),
+                cover_path=Path("1.png"),
+                primary_category="其他",
+                consent_confirmed=True,
+            ),
+            ShortStoryConfig(
+                story_id="story-2",
+                name="待发布甲",
+                source_path=Path("2.txt"),
+                cover_path=Path("2.png"),
+                primary_category="其他",
+                consent_confirmed=True,
+            ),
+            ShortStoryConfig(
+                story_id="story-3",
+                name="待发布乙",
+                source_path=Path("3.txt"),
+                cover_path=Path("3.png"),
+                primary_category="其他",
+                consent_confirmed=True,
+            ),
+        ]
+
+        class Service:
+            def list_short_stories(self):
+                return stories
+
+            def get_short_story(self, story_id: str):
+                return next(story for story in stories if story.story_id == story_id)
+
+            def update_short_story(self, _story) -> None:
+                pass
+
+        class Publisher:
+            submitted: list[str] = []
+
+            def __init__(self, _gateway) -> None:
+                pass
+
+            def published_titles(self):
+                return {"已发布故事"}
+
+            def submit(self, config):
+                self.submitted.append(config.name)
+                return ShortStorySubmissionResult(True)
+
+        report = publish_all_short_stories(
+            Service(), object(), publisher_factory=Publisher
+        )
+
+        self.assertTrue(report.success)
+        self.assertEqual(report.skipped_names, ("已发布故事",))
+        self.assertEqual(report.submitted_names, ("待发布甲", "待发布乙"))
+        self.assertEqual(Publisher.submitted, ["待发布甲", "待发布乙"])
+
+    def test_short_story_queue_stops_on_the_first_failed_story(self):
+        stories = [
+            ShortStoryConfig(
+                story_id="story-1",
+                name="待发布甲",
+                source_path=Path("1.txt"),
+                cover_path=Path("1.png"),
+                primary_category="其他",
+                consent_confirmed=True,
+            ),
+            ShortStoryConfig(
+                story_id="story-2",
+                name="待发布乙",
+                source_path=Path("2.txt"),
+                cover_path=Path("2.png"),
+                primary_category="其他",
+                consent_confirmed=True,
+            ),
+        ]
+
+        class Service:
+            def list_short_stories(self):
+                return stories
+
+            def get_short_story(self, story_id: str):
+                return next(story for story in stories if story.story_id == story_id)
+
+            def update_short_story(self, _story) -> None:
+                pass
+
+        class Publisher:
+            submitted: list[str] = []
+
+            def __init__(self, _gateway) -> None:
+                pass
+
+            def published_titles(self):
+                return set()
+
+            def submit(self, config):
+                self.submitted.append(config.name)
+                if config.name == "待发布甲":
+                    return ShortStorySubmissionResult(False, error="分类未保存")
+                return ShortStorySubmissionResult(True)
+
+        report = publish_all_short_stories(
+            Service(), object(), publisher_factory=Publisher
+        )
+
+        self.assertFalse(report.success)
+        self.assertEqual(report.submitted_names, ())
+        self.assertEqual(report.failed_name, "待发布甲")
+        self.assertEqual(report.error, "分类未保存")
+        self.assertEqual(Publisher.submitted, ["待发布甲"])
 
 
 if __name__ == "__main__":
