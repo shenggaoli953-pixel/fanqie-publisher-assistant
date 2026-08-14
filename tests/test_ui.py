@@ -8,6 +8,8 @@ import unittest
 from unittest.mock import patch
 
 from publisher.browser import PreflightResult, PreflightStatus, SubmissionResult
+from publisher.activity import ActivityEntry, RunControl
+from publisher.application import ApplicationContext
 from publisher.models import BookConfig, Chapter, PublishMode, RemoteChapter, ScheduledDay
 from publisher.workflows import ShortStoryQueueReport
 from publisher.ui import (
@@ -763,6 +765,71 @@ class UiFormattingTests(unittest.TestCase):
             schedule=[("schedule", "book-1")],
         )
         show_info.assert_called_once()
+
+    def test_stop_task_requests_a_safe_stop_without_closing_gateway(self):
+        class Service:
+            def list_books(self):
+                return []
+
+        root = tk.Tk()
+        root.withdraw()
+        self.addCleanup(root.destroy)
+        app = PublisherApp(root, Service(), object())
+        app._task_control = RunControl()
+        app._task_running = True
+
+        app._request_task_stop()
+
+        self.assertTrue(app._task_control.stop_requested())
+        self.assertEqual(app._task_status_var.get(), "将在当前章节结束后停止")
+
+    def test_activity_log_has_a_scrollable_history_table(self):
+        class Service:
+            def list_books(self):
+                return []
+
+        class ActivityLog:
+            def recent(self):
+                return tuple(
+                    ActivityEntry(
+                        recorded_at=datetime(2026, 8, 15, 8, index),
+                        operation="排程发布",
+                        state="已提交",
+                        chapter_number=index,
+                    )
+                    for index in range(1, 11)
+                )
+
+        root = tk.Tk()
+        root.withdraw()
+        self.addCleanup(root.destroy)
+        app = PublisherApp(root, Service(), object())
+        app._activity_log = ActivityLog()
+
+        app._open_activity_log()
+
+        self.assertEqual(app._activity_table.get_children().__len__(), 10)
+        self.assertEqual(str(app._activity_scrollbar.cget("orient")), "vertical")
+
+    def test_switch_account_refreshes_when_idle(self):
+        with TemporaryDirectory() as temp_dir:
+            context = ApplicationContext(Path(temp_dir) / "data")
+            second = context.accounts.add("作家 B")
+            root = tk.Tk()
+            root.withdraw()
+            self.addCleanup(root.destroy)
+            app = PublisherApp(
+                root,
+                context.service(),
+                context.gateway_factory(),
+                context=context,
+            )
+
+            app._switch_account(second.profile_id)
+
+            self.assertEqual(context.active_profile().profile_id, second.profile_id)
+            self.assertIsNone(app._selected_book_id)
+            self.assertEqual(app._account_name_var.get(), "作家 B")
 
     def test_format_rows_summarize_every_chapter_number_for_a_day(self):
         chapters = (

@@ -65,6 +65,15 @@ class AccountRegistryTests(unittest.TestCase):
         with self.assertRaisesRegex(KeyError, "未知账号"):
             registry.set_active("unknown")
 
+    def test_duplicate_account_names_are_rejected_after_normalization(self):
+        registry = AccountRegistry(self.data_dir)
+        account = registry.add("作家 B")
+
+        with self.assertRaisesRegex(ValueError, "账号名称重复"):
+            registry.add("  作家 B  ")
+        with self.assertRaisesRegex(ValueError, "账号名称重复"):
+            registry.rename(account.profile_id, "默认账号")
+
 
 if __name__ == "__main__":
     unittest.main()

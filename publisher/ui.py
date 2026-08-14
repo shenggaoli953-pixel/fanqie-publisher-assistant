@@ -6,13 +6,15 @@ from queue import Empty, Queue
 import sys
 from threading import Thread
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 from collections.abc import Callable
 from uuid import uuid4
 
 from publisher.browser import EdgePublisherGateway, PreflightStatus, PublishDraft
 from publisher.chapters import ChapterParseError, discover_project, read_chapter_body
 from publisher.diagnostics import write_diagnostic_report
+from publisher.activity import ActivityLog, RunControl
+from publisher.application import ApplicationContext
 from publisher.models import BookConfig, PublishMode, RemoteChapter, ScheduledDay
 from publisher.service import PublishingService
 from publisher.short_story import (
@@ -457,16 +459,26 @@ class PublisherApp:
         service: PublishingService,
         gateway: EdgePublisherGateway | Callable[[], EdgePublisherGateway],
         theme_settings_path: Path | None = None,
+        context: ApplicationContext | None = None,
     ) -> None:
         self._root = root
         self._service = service
         self._gateway_provider = gateway
         self._gateway = gateway
+        self._context = context
+        self._activity_log = (
+            ActivityLog(
+                context.accounts.workspace_dir(context.active_profile().profile_id)
+            )
+            if context is not None
+            else None
+        )
         self._theme_settings_path = theme_settings_path
         self._selected_book_id: str | None = None
         self._selected_story_id: str | None = None
         self._task_events: Queue[tuple[str, object]] = Queue()
         self._task_running = False
+        self._task_control: RunControl | None = None
         self._mode_var = tk.StringVar()
         self._limit_var = tk.StringVar()
         self._time_var = tk.StringVar()
@@ -480,6 +492,7 @@ class PublisherApp:
         self._detail_date_var = tk.StringVar(value="当天章节")
         self._failure_var = tk.StringVar()
         self._task_status_var = tk.StringVar(value="就绪")
+        self._account_name_var = tk.StringVar()
         self._theme_name_var = tk.StringVar(value=_load_ui_theme(theme_settings_path))
         self._story_name_var = tk.StringVar()
         self._story_source_var = tk.StringVar()
@@ -492,9 +505,13 @@ class PublisherApp:
         self._story_consent_var = tk.BooleanVar(value=False)
         self._story_info_var = tk.StringVar(value="添加短故事后会显示正文预览信息。")
         self._schedule_days: dict[str, ScheduledDay] = {}
+        self._account_ids: dict[str, str] = {}
         self._build_window()
+        self._refresh_accounts()
         self._refresh_books()
         self._refresh_short_stories()
+        if context is not None and not context.active_profile().guide_seen:
+            self._root.after(200, self._show_first_run_guide)
         self._root.after(100, self._drain_task_events)
 
     def _configure_styles(self, style: ttk.Style) -> None:
@@ -839,6 +856,48 @@ class PublisherApp:
             font=_BODY_FONT,
         )
         self._header_subtitle_label.grid(row=1, column=1, padx=(0, 18), pady=(0, 8), sticky="nw")
+        column = 3
+        if self._context is not None:
+            self._account_box = ttk.Combobox(
+                self._header,
+                textvariable=self._account_name_var,
+                state="readonly",
+                width=12,
+                style="Header.TCombobox",
+            )
+            self._account_box.grid(row=0, column=column, rowspan=2, padx=(8, 4))
+            self._account_box.bind("<<ComboboxSelected>>", self._on_account_selected)
+            column += 1
+            self._add_account_button = ttk.Button(
+                self._header,
+                text="添加账号",
+                command=self._add_account,
+                style="Secondary.TButton",
+            )
+            self._add_account_button.grid(row=0, column=column, padx=(0, 4), pady=(8, 2))
+            self._rename_account_button = ttk.Button(
+                self._header,
+                text="重命名",
+                command=self._rename_account,
+                style="Secondary.TButton",
+            )
+            self._rename_account_button.grid(row=1, column=column, padx=(0, 4), pady=(2, 8))
+            column += 1
+        self._activity_button = ttk.Button(
+            self._header,
+            text="记录",
+            command=self._open_activity_log,
+            style="Secondary.TButton",
+        )
+        self._activity_button.grid(row=0, column=column, padx=(0, 4), pady=(8, 2))
+        self._help_button = ttk.Button(
+            self._header,
+            text="帮助",
+            command=self._open_help,
+            style="Secondary.TButton",
+        )
+        self._help_button.grid(row=1, column=column, padx=(0, 4), pady=(2, 8))
+        column += 1
         self._theme_box = ttk.Combobox(
             self._header,
             textvariable=self._theme_name_var,
@@ -847,8 +906,9 @@ class PublisherApp:
             width=9,
             style="Header.TCombobox",
         )
-        self._theme_box.grid(row=0, column=3, rowspan=2, padx=(8, 8))
+        self._theme_box.grid(row=0, column=column, rowspan=2, padx=(4, 8))
         self._theme_box.bind("<<ComboboxSelected>>", self._apply_selected_theme)
+        column += 1
         self._header_status = tk.Label(
             self._header,
             textvariable=self._task_status_var,
@@ -860,14 +920,15 @@ class PublisherApp:
             width=18,
             anchor="w",
         )
-        self._header_status.grid(row=0, column=4, rowspan=2, padx=8, sticky="e")
+        self._header_status.grid(row=0, column=column, rowspan=2, padx=8, sticky="e")
+        column += 1
         self._task_progress = ttk.Progressbar(
             self._header,
             mode="indeterminate",
             length=120,
             style="Header.Horizontal.TProgressbar",
         )
-        self._task_progress.grid(row=0, column=5, rowspan=2, padx=(8, 20))
+        self._task_progress.grid(row=0, column=column, rowspan=2, padx=(8, 20))
 
         notebook = ttk.Notebook(self._root, style="App.TNotebook")
         notebook.grid(row=1, column=0, sticky="nsew", padx=16, pady=(10, 12))
@@ -1134,6 +1195,14 @@ class PublisherApp:
             style="Secondary.TButton",
         )
         self._sync_button.pack(side="left", padx=(8, 0))
+        self._stop_button = ttk.Button(
+            actions,
+            text="停止任务",
+            command=self._request_task_stop,
+            style="Secondary.TButton",
+            state="disabled",
+        )
+        self._stop_button.pack(side="left", padx=(8, 0))
         self._preview_button = ttk.Button(
             actions,
             text="查看发布清单",
@@ -1572,6 +1641,174 @@ class PublisherApp:
         provider = self._gateway_provider
         return provider() if callable(provider) else provider
 
+    def _refresh_accounts(self) -> None:
+        if self._context is None:
+            return
+        profiles = self._context.accounts.profiles()
+        self._account_ids = {
+            profile.display_name: profile.profile_id for profile in profiles
+        }
+        self._account_box.configure(values=tuple(self._account_ids))
+        self._account_name_var.set(self._context.active_profile().display_name)
+
+    def _on_account_selected(self, _event: object) -> None:
+        profile_id = self._account_ids.get(self._account_name_var.get())
+        if profile_id is not None:
+            self._switch_account(profile_id)
+
+    def _add_account(self) -> None:
+        if self._context is None:
+            return
+        name = simpledialog.askstring("添加账号", "本地账号名称", parent=self._root)
+        if name is None:
+            return
+        try:
+            profile = self._context.accounts.add(name)
+        except ValueError as error:
+            messagebox.showerror("无法添加账号", str(error), parent=self._root)
+            return
+        self._switch_account(profile.profile_id)
+
+    def _rename_account(self) -> None:
+        if self._context is None:
+            return
+        current = self._context.active_profile()
+        name = simpledialog.askstring(
+            "重命名账号",
+            "本地账号名称",
+            initialvalue=current.display_name,
+            parent=self._root,
+        )
+        if name is None:
+            return
+        try:
+            self._context.accounts.rename(current.profile_id, name)
+        except ValueError as error:
+            messagebox.showerror("无法重命名账号", str(error), parent=self._root)
+            return
+        self._refresh_accounts()
+
+    def _switch_account(self, profile_id: str) -> None:
+        if self._context is None:
+            return
+        if self._task_running:
+            messagebox.showinfo("任务正在进行", "请先停止当前任务。", parent=self._root)
+            self._refresh_accounts()
+            return
+        profile = self._context.switch(profile_id)
+        self._service = self._context.service()
+        self._gateway_provider = self._context.gateway_factory()
+        self._gateway = self._gateway_provider
+        self._activity_log = ActivityLog(
+            self._context.accounts.workspace_dir(profile.profile_id)
+        )
+        self._selected_book_id = None
+        self._selected_story_id = None
+        self._book_name_var.set("未选择作品")
+        self._publish_state_var.set("")
+        self._refresh_accounts()
+        self._refresh_books()
+        self._refresh_short_stories()
+        self._task_status_var.set(f"已切换到{profile.display_name}")
+
+    def _request_task_stop(self) -> None:
+        if self._task_control is None:
+            return
+        self._task_control.request_stop()
+        self._task_status_var.set("将在当前章节结束后停止")
+        self._stop_button.configure(state="disabled")
+
+    def _open_activity_log(self) -> None:
+        entries = self._activity_log.recent() if self._activity_log is not None else ()
+        dialog = tk.Toplevel(self._root)
+        dialog.title("活动记录")
+        dialog.transient(self._root)
+        dialog.geometry("700x420")
+        dialog.minsize(580, 300)
+        dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(1, weight=1)
+        ttk.Label(
+            dialog,
+            text="仅记录时间、操作、章节号和错误类别；不包含正文、标题、路径、账号或登录信息。",
+            style="App.TLabel",
+        ).grid(row=0, column=0, sticky="w", padx=18, pady=(16, 10))
+        table_frame = ttk.Frame(dialog)
+        table_frame.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 16))
+        table_frame.columnconfigure(0, weight=1)
+        table_frame.rowconfigure(0, weight=1)
+        table = ttk.Treeview(
+            table_frame,
+            columns=("time", "operation", "state", "chapter", "category"),
+            show="headings",
+            style="App.Treeview",
+        )
+        for column, label, width in (
+            ("time", "时间", 180),
+            ("operation", "操作", 110),
+            ("state", "状态", 110),
+            ("chapter", "章节", 90),
+            ("category", "错误类别", 130),
+        ):
+            table.heading(column, text=label)
+            table.column(column, width=width, anchor="w", stretch=column == "time")
+        for entry in entries:
+            table.insert(
+                "",
+                tk.END,
+                values=(
+                    entry.recorded_at.astimezone().strftime("%Y-%m-%d %H:%M:%S"),
+                    entry.operation,
+                    entry.state,
+                    f"第{entry.chapter_number}章" if entry.chapter_number else "",
+                    entry.error_category or "",
+                ),
+            )
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=table.yview)
+        table.configure(yscrollcommand=scrollbar.set)
+        table.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns", padx=(6, 0))
+        self._activity_table = table
+        self._activity_scrollbar = scrollbar
+
+    def _open_help(self) -> None:
+        self._show_help_dialog("使用帮助")
+
+    def _show_first_run_guide(self) -> None:
+        if self._context is None or self._context.active_profile().guide_seen:
+            return
+        self._show_help_dialog("欢迎使用")
+        self._context.accounts.mark_guide_seen(
+            self._context.active_profile().profile_id
+        )
+
+    def _show_help_dialog(self, title: str) -> None:
+        dialog = tk.Toplevel(self._root)
+        dialog.title(title)
+        dialog.transient(self._root)
+        dialog.geometry("560x360")
+        dialog.minsize(480, 300)
+        ttk.Label(dialog, text="番茄创作发布助手", style="Title.TLabel").pack(
+            anchor="w", padx=22, pady=(20, 8)
+        )
+        ttk.Label(
+            dialog,
+            text=(
+                "1. 选择本地账号，并在该账号自己的 Edge 窗口完成登录。\n\n"
+                "2. 添加作品后，先核对发布清单，再开始排程发布。\n\n"
+                "3. 停止任务会等待当前章节结束，不会启动下一章。\n\n"
+                "4. 反馈问题时请导出诊断或活动记录；不要发送账号、验证码、Cookie、正文或 Edge 配置。\n\n"
+                f"当前版本：{_APP_VERSION}"
+            ),
+            justify="left",
+            style="App.TLabel",
+        ).pack(anchor="w", padx=22, pady=(0, 18))
+        ttk.Button(
+            dialog,
+            text="关闭",
+            command=dialog.destroy,
+            style="Secondary.TButton",
+        ).pack(anchor="e", padx=22, pady=(0, 18))
+
     def _start_task(
         self,
         label: str,
@@ -1606,6 +1843,7 @@ class PublisherApp:
                     continue
                 self._task_running = False
                 self._task_progress.stop()
+                self._task_control = None
                 self._set_task_buttons_enabled(True)
                 if event == "error":
                     self._task_status_var.set("任务已停止")
@@ -1627,6 +1865,16 @@ class PublisherApp:
             button = getattr(self, name, None)
             if button is not None:
                 button.configure(state=state)
+        stop_button = getattr(self, "_stop_button", None)
+        if stop_button is not None:
+            stop_button.configure(
+                state=("normal" if not enabled and self._task_control is not None else "disabled")
+            )
+        if self._context is not None:
+            account_state = "readonly" if enabled else "disabled"
+            self._account_box.configure(state=account_state)
+            self._add_account_button.configure(state=state)
+            self._rename_account_button.configure(state=state)
 
     def _close_gateway(self, gateway) -> None:
         close = getattr(gateway, "close", None)
@@ -1770,6 +2018,11 @@ class PublisherApp:
                 parent=self._root,
             )
             return
+        if self._task_running:
+            self._task_status_var.set("已有任务正在运行")
+            return
+        control = RunControl()
+        self._task_control = control
 
         def operation() -> PublishRunReport:
             gateway = self._make_gateway()
@@ -1779,6 +2032,8 @@ class PublisherApp:
                     gateway,
                     book_id,
                     read_body=read_chapter_body,
+                    control=control,
+                    activity_log=self._activity_log,
                     on_progress=lambda message: self._task_events.put(
                         ("progress", message)
                     ),
@@ -1788,6 +2043,9 @@ class PublisherApp:
 
         def done(report: PublishRunReport) -> None:
             self._load_book(book_id)
+            if report.cancelled:
+                self._task_status_var.set("任务已停止")
+                return
             if not report.success:
                 self._task_status_var.set("发布已停止")
                 messagebox.showerror(
@@ -2279,13 +2537,13 @@ class PublisherApp:
 
 
 def run_app(data_dir: Path) -> None:
-    from publisher.repository import JsonRepository
-
+    context = ApplicationContext(data_dir)
     root = tk.Tk()
     PublisherApp(
         root,
-        PublishingService(JsonRepository(data_dir)),
-        lambda: EdgePublisherGateway(data_dir / "fanqie-edge-profile"),
+        context.service(),
+        context.gateway_factory(),
         theme_settings_path=data_dir / "ui-settings.json",
+        context=context,
     )
     root.mainloop()

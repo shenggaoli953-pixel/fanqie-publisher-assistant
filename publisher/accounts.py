@@ -60,9 +60,11 @@ class AccountRegistry:
 
     def add(self, display_name: str) -> AccountProfile:
         profiles, _active_id = self._load()
+        normalized_name = self._normalized_name(display_name)
+        self._require_unique_name(profiles, normalized_name)
         profile = AccountProfile(
             uuid4().hex,
-            self._normalized_name(display_name),
+            normalized_name,
             debug_port=self._next_debug_port(profiles),
         )
         self._save([*profiles, profile], profile.profile_id)
@@ -71,7 +73,9 @@ class AccountRegistry:
     def rename(self, profile_id: str, display_name: str) -> AccountProfile:
         profiles, active_id = self._load()
         current = self._find(profiles, profile_id)
-        updated = replace(current, display_name=self._normalized_name(display_name))
+        normalized_name = self._normalized_name(display_name)
+        self._require_unique_name(profiles, normalized_name, excluding=profile_id)
+        updated = replace(current, display_name=normalized_name)
         self._save(
             [updated if profile.profile_id == profile_id else profile for profile in profiles],
             active_id,
@@ -155,6 +159,21 @@ class AccountRegistry:
         if not value:
             raise ValueError("账号名称不能为空")
         return value
+
+    @staticmethod
+    def _require_unique_name(
+        profiles: list[AccountProfile],
+        display_name: str,
+        *,
+        excluding: str | None = None,
+    ) -> None:
+        normalized = display_name.casefold()
+        if any(
+            profile.profile_id != excluding
+            and profile.display_name.casefold() == normalized
+            for profile in profiles
+        ):
+            raise ValueError("账号名称重复")
 
     @staticmethod
     def _next_debug_port(profiles: list[AccountProfile]) -> int:
