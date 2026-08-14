@@ -115,17 +115,26 @@ class PublishingService:
         next_chapter: int,
         publish_end_chapter: int | None,
         ai_generated: bool = True,
+        publish_times: tuple[time, ...] | None = None,
     ) -> None:
         book = self.get_book(book_id)
+        updated_publish_times = (
+            book.publish_times if publish_times is None else publish_times
+        )
         updated_book = replace(
             book,
             mode=mode,
             limit=limit,
-            publish_time=publish_time,
             publish_start_date=publish_start_date,
             next_chapter=next_chapter,
             publish_end_chapter=publish_end_chapter,
             ai_generated=ai_generated,
+            publish_time=(
+                updated_publish_times[0]
+                if updated_publish_times
+                else publish_time
+            ),
+            publish_times=updated_publish_times,
         )
         state = self._get_state(book_id)
         submitted = set(state.submitted_chapters)

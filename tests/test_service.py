@@ -145,6 +145,38 @@ class ServiceTests(unittest.TestCase):
 
         self.assertFalse(self.service.get_book("robot").ai_generated)
 
+    def test_policy_preserves_or_replaces_multiple_publish_times_explicitly(self):
+        self.service.update_policy(
+            "robot",
+            mode=PublishMode.CHAPTERS,
+            limit=1,
+            publish_time=time(8, 0),
+            publish_start_date=date(2026, 7, 27),
+            next_chapter=1,
+            publish_end_chapter=None,
+            publish_times=(time(8, 0), time(12, 0)),
+        )
+
+        self.assertEqual(
+            self.service.get_book("robot").effective_publish_times,
+            (time(8, 0), time(12, 0)),
+        )
+
+        self.service.update_policy(
+            "robot",
+            mode=PublishMode.CHAPTERS,
+            limit=2,
+            publish_time=time(8, 0),
+            publish_start_date=date(2026, 7, 27),
+            next_chapter=1,
+            publish_end_chapter=None,
+        )
+
+        self.assertEqual(
+            self.service.get_book("robot").effective_publish_times,
+            (time(8, 0), time(12, 0)),
+        )
+
     def test_submission_advances_only_within_the_selected_range(self):
         self.service.update_policy(
             "robot",
