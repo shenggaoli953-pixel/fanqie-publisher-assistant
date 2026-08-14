@@ -265,7 +265,11 @@ class UiFormattingTests(unittest.TestCase):
                 theme_settings_path=settings_path,
             )
 
-        self.assertEqual(app._theme_name_var.get(), "Codex 浅色")
+            self.assertEqual(app._theme_name_var.get(), "Codex 浅色")
+            self.assertEqual(
+                json.loads(settings_path.read_text(encoding="utf-8")),
+                {"version": 2, "theme": "Codex 浅色"},
+            )
 
     def test_minimum_window_keeps_schedule_panels_usable(self):
         class Service:

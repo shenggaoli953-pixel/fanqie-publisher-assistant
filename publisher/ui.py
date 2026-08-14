@@ -216,6 +216,25 @@ _UI_THEMES: dict[str, dict[str, str]] = {
 }
 
 
+def _write_ui_theme(settings_path: Path, theme: str) -> None:
+    try:
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = settings_path.with_suffix(settings_path.suffix + ".tmp")
+        temporary_path.write_text(
+            json.dumps(
+                {
+                    "version": _UI_THEME_SETTINGS_VERSION,
+                    "theme": theme,
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        temporary_path.replace(settings_path)
+    except OSError:
+        return
+
+
 def _load_ui_theme(settings_path: Path | None) -> str:
     if settings_path is None or not settings_path.exists():
         return _DEFAULT_UI_THEME
@@ -228,6 +247,7 @@ def _load_ui_theme(settings_path: Path | None) -> str:
     theme = payload.get("theme")
     if payload.get("version") != _UI_THEME_SETTINGS_VERSION:
         theme = _LEGACY_UI_THEMES.get(theme, _DEFAULT_UI_THEME)
+        _write_ui_theme(settings_path, theme)
     return theme if theme in _UI_THEMES else _DEFAULT_UI_THEME
 
 
@@ -549,24 +569,7 @@ class PublisherApp:
     def _save_selected_theme(self) -> None:
         if self._theme_settings_path is None:
             return
-        try:
-            self._theme_settings_path.parent.mkdir(parents=True, exist_ok=True)
-            temporary_path = self._theme_settings_path.with_suffix(
-                self._theme_settings_path.suffix + ".tmp"
-            )
-            temporary_path.write_text(
-                json.dumps(
-                    {
-                        "version": _UI_THEME_SETTINGS_VERSION,
-                        "theme": self._theme_name_var.get(),
-                    },
-                    ensure_ascii=False,
-                ),
-                encoding="utf-8",
-            )
-            temporary_path.replace(self._theme_settings_path)
-        except OSError:
-            return
+        _write_ui_theme(self._theme_settings_path, self._theme_name_var.get())
 
     def _configure_listbox_theme(self, widget: tk.Listbox, palette: dict[str, str]) -> None:
         widget.configure(
