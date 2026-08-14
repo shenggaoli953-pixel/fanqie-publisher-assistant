@@ -409,6 +409,71 @@ class _DelayedNonChapterWarningPage:
         return self.dialog
 
 
+class _AdaptiveDialogButton:
+    def __init__(self) -> None:
+        self.clicked = False
+
+    @property
+    def last(self) -> "_AdaptiveDialogButton":
+        return self
+
+    def count(self) -> int:
+        return 1
+
+    def is_visible(self) -> bool:
+        return True
+
+    def click(self) -> None:
+        self.clicked = True
+
+
+class _AdaptiveDialogButtons:
+    def all_inner_texts(self) -> list[str]:
+        return ["返回修改", "继续提交"]
+
+
+class _AdaptiveDialog:
+    def __init__(self, button: _AdaptiveDialogButton) -> None:
+        self._button = button
+
+    def is_visible(self) -> bool:
+        return True
+
+    def inner_text(self) -> str:
+        return "检测提示，可继续提交或返回修改。"
+
+    def get_by_role(self, role: str, **kwargs):
+        if role != "button":
+            raise AssertionError(f"unexpected role: {role}")
+        if "name" not in kwargs:
+            return _AdaptiveDialogButtons()
+        if kwargs["name"] == "继续提交":
+            return self._button
+        return _MissingLocator()
+
+
+class _AdaptiveDialogCollection:
+    def __init__(self, dialog: _AdaptiveDialog) -> None:
+        self._dialog = dialog
+
+    def count(self) -> int:
+        return 1
+
+    def nth(self, index: int) -> _AdaptiveDialog:
+        assert index == 0
+        return self._dialog
+
+
+class _AdaptiveDialogPage:
+    def __init__(self) -> None:
+        self.button = _AdaptiveDialogButton()
+        self.dialogs = _AdaptiveDialogCollection(_AdaptiveDialog(self.button))
+
+    def get_by_role(self, role: str):
+        assert role == "dialog"
+        return self.dialogs
+
+
 class _MissingLocator:
     @property
     def last(self) -> "_MissingLocator":
@@ -861,6 +926,14 @@ class BrowserTests(unittest.TestCase):
 
         EdgePublisherGateway._submit_non_chapter_notice_if_present(page)
 
+        self.assertTrue(page.button.clicked)
+
+    def test_visible_publish_dialog_advances_with_an_unseen_continue_submit_label(self):
+        page = _AdaptiveDialogPage()
+
+        advanced = EdgePublisherGateway._advance_visible_publish_dialog(page)
+
+        self.assertTrue(advanced)
         self.assertTrue(page.button.clicked)
 
     def test_comprehensive_check_ignores_matching_words_in_the_chapter_body(self):

@@ -9,6 +9,7 @@ from publisher.browser import (
     PublishBlockedError,
     PublishOutcome,
 )
+from publisher.dialogs import choose_publish_progress_action
 from publisher.short_story import (
     ShortStoryConfig,
     ShortStoryDraft,
@@ -125,7 +126,9 @@ class ShortStoryPublisher:
                 page, config.consent_confirmed, draft_url
             )
             self._upload_cover(page, config.cover_path, draft_url)
-            outcome, message = self._publish(page)
+            outcome, message = self._publish(
+                page, allow_agreement=config.consent_confirmed
+            )
         except ShortStoryAgreementRequired:
             raise
         except Exception as error:
@@ -514,7 +517,9 @@ class ShortStoryPublisher:
         return requires_cover_agreement(text, agreed)
 
     @staticmethod
-    def _publish(page) -> tuple[PublishOutcome, str]:
+    def _publish(
+        page, *, allow_agreement: bool = True
+    ) -> tuple[PublishOutcome, str]:
         for _ in range(8):
             dialog = ShortStoryPublisher._visible_publish_dialog(page)
             if dialog is not None:
@@ -542,6 +547,13 @@ class ShortStoryPublisher:
                         )
                 if "提交确认" in dialog_text:
                     return ShortStoryPublisher._confirm_submission(page, dialog)
+                action = ShortStoryPublisher._safe_dialog_action(
+                    dialog, dialog_text, allow_agreement=allow_agreement
+                )
+                if action is not None:
+                    action.click(force=True)
+                    page.wait_for_timeout(500)
+                    continue
 
             next_step = page.get_by_role(
                 "button", name="下一步", exact=True
@@ -568,6 +580,27 @@ class ShortStoryPublisher:
             if indicator in body_text:
                 raise PublishBlockedError(indicator)
         raise PublishBlockedError("短故事未进入提交确认页面")
+
+    @staticmethod
+    def _safe_dialog_action(dialog, dialog_text: str, *, allow_agreement: bool):
+        try:
+            buttons = dialog.get_by_role("button")
+            button_names = {
+                name.strip() for name in buttons.all_inner_texts() if name.strip()
+            }
+            action_name = choose_publish_progress_action(
+                dialog_text,
+                button_names,
+                allow_agreement=allow_agreement,
+            )
+            if action_name is None:
+                return None
+            action = dialog.get_by_role(
+                "button", name=action_name, exact=True
+            ).last
+            return action if action.count() and action.is_visible() else None
+        except Exception:
+            return None
 
     @staticmethod
     def _visible_publish_dialog(page):

@@ -8,6 +8,7 @@ import time
 from collections.abc import Callable
 from typing import Protocol
 
+from publisher.dialogs import choose_publish_progress_action
 from publisher.models import RemoteChapter
 
 
@@ -182,17 +183,7 @@ def schedule_values(publish_at: datetime) -> tuple[str, str]:
 
 
 def choose_continue_action(button_names: set[str]) -> str | None:
-    for action in ("继续发布", "提交", "继续", "确认"):
-        if action in button_names:
-            return action
-    non_editing_actions = {
-        action
-        for action in button_names
-        if action not in {"修改", "去修改", "取消", "返回", "关闭"}
-    }
-    if len(non_editing_actions) == 1:
-        return next(iter(non_editing_actions))
-    return None
+    return choose_publish_progress_action("", button_names)
 
 
 def interpret_publish_response(payload: object) -> tuple[PublishOutcome, str]:
@@ -1123,10 +1114,12 @@ class EdgePublisherGateway:
             ) as response_info:
                 confirm.click()
                 EdgePublisherGateway._submit_non_chapter_notice_if_present(page)
+                EdgePublisherGateway._advance_visible_publish_dialog(page)
             response = response_info.value
             return interpret_publish_response(response.json())
         except Exception:
             EdgePublisherGateway._submit_non_chapter_notice_if_present(page, timeout_ms=500)
+            EdgePublisherGateway._advance_visible_publish_dialog(page)
             body_text = page.locator("body").inner_text()
             for indicator in ("提交字数超出每日上限", "额度不足", "验证码", "发布失败"):
                 if indicator in body_text:
@@ -1163,6 +1156,9 @@ class EdgePublisherGateway:
             if publish.count() and publish.is_visible():
                 publish.click()
                 return
+            if EdgePublisherGateway._advance_visible_publish_dialog(page):
+                page.wait_for_timeout(300)
+                continue
             page.wait_for_timeout(100)
         raise PublishBlockedError("未出现发布设置入口")
 
@@ -1201,6 +1197,37 @@ class EdgePublisherGateway:
                 submit.click()
                 return
             page.wait_for_timeout(100)
+
+    @staticmethod
+    def _advance_visible_publish_dialog(page) -> bool:
+        dialogs = page.get_by_role("dialog")
+        try:
+            dialog_count = dialogs.count()
+        except Exception:
+            return False
+        for index in range(dialog_count - 1, -1, -1):
+            dialog = dialogs.nth(index) if hasattr(dialogs, "nth") else dialogs.last
+            try:
+                if not dialog.is_visible():
+                    continue
+                buttons = dialog.get_by_role("button")
+                button_names = {
+                    name.strip() for name in buttons.all_inner_texts() if name.strip()
+                }
+                action = choose_publish_progress_action(
+                    dialog.inner_text(), button_names
+                )
+                if action is None:
+                    continue
+                button = dialog.get_by_role(
+                    "button", name=action, exact=True
+                ).last
+                if button.count() and button.is_visible():
+                    button.click()
+                    return True
+            except Exception:
+                continue
+        return False
 
     @staticmethod
     def _dismiss_picker_popup(page, input_locator) -> None:

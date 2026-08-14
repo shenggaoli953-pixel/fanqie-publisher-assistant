@@ -834,6 +834,36 @@ class _PublishFlowDialog:
         return _MissingPublishDialog()
 
 
+class _AdaptivePublishFlowDialog(_PublishFlowDialog):
+    def __init__(self, page: "_AdaptivePublishFlowPage") -> None:
+        super().__init__(page)
+        self.continue_publish = _FlowButton(
+            lambda: setattr(page, "stage", "confirmation")
+        )
+
+    def inner_text(self) -> str:
+        if self.page.stage == "warning":
+            return "系统提示：当前内容可继续提交，也可以返回修改。"
+        return super().inner_text()
+
+    def get_by_role(
+        self, role: str, *, name: str | None = None, exact: bool = True
+    ):
+        if role == "button" and name is None:
+            return _AdaptiveButtonNames({"继续提交", "返回修改"})
+        if name == "继续提交" and self.page.stage == "warning":
+            return self.continue_publish
+        return super().get_by_role(role, name=name, exact=exact)
+
+
+class _AdaptiveButtonNames:
+    def __init__(self, names: set[str]) -> None:
+        self._names = names
+
+    def all_inner_texts(self) -> list[str]:
+        return list(self._names)
+
+
 class _PublishFlowPage:
     def __init__(self, first_dialog: str = "agreement") -> None:
         self.stage = "draft"
@@ -878,6 +908,12 @@ class _PublishFlowPage:
         )()
         assert predicate(response)
         yield type("ResponseInfo", (), {"value": response})()
+
+
+class _AdaptivePublishFlowPage(_PublishFlowPage):
+    def __init__(self) -> None:
+        super().__init__(first_dialog="warning")
+        self.dialog = _AdaptivePublishFlowDialog(self)
 
 
 class _NonSemanticPublishFlowPage(_PublishFlowPage):
@@ -1374,6 +1410,15 @@ class ShortStoryBrowserTests(unittest.TestCase):
 
         self.assertIs(outcome, PublishOutcome.SUCCESS)
         self.assertEqual(message, "发布成功")
+        self.assertEqual(page.dialog.continue_publish.click_calls, 1)
+        self.assertEqual(page.dialog.confirm.click_calls, 1)
+
+    def test_publish_handles_an_unseen_continue_submit_button(self):
+        page = _AdaptivePublishFlowPage()
+
+        outcome, _message = ShortStoryPublisher._publish(page)
+
+        self.assertEqual(outcome, PublishOutcome.SUCCESS)
         self.assertEqual(page.dialog.continue_publish.click_calls, 1)
         self.assertEqual(page.dialog.confirm.click_calls, 1)
 

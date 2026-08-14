@@ -823,7 +823,7 @@ class UiFormattingTests(unittest.TestCase):
 
         export.assert_called_once_with(
             destination,
-                version="0.4.0",
+                version="0.4.1",
             state={"book_id": "book-1"},
             schedule=[("schedule", "book-1")],
         )
