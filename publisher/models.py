@@ -21,6 +21,7 @@ class BookConfig:
     publish_start_date: date | None = None
     publish_end_chapter: int | None = None
     ai_generated: bool = True
+    publish_times: tuple[time, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.book_id.strip():
@@ -33,8 +34,17 @@ class BookConfig:
             raise ValueError("next_chapter must be greater than zero")
         if self.publish_end_chapter is not None and self.publish_end_chapter <= 0:
             raise ValueError("publish_end_chapter must be greater than zero")
+        if self.publish_times and (
+            len(set(self.publish_times)) != len(self.publish_times)
+            or tuple(sorted(self.publish_times)) != self.publish_times
+        ):
+            raise ValueError("publish_times must be unique and ascending")
 
-    def to_dict(self) -> dict[str, str | int | bool | None]:
+    @property
+    def effective_publish_times(self) -> tuple[time, ...]:
+        return self.publish_times or (self.publish_time,)
+
+    def to_dict(self) -> dict[str, object]:
         return {
             "book_id": self.book_id,
             "name": self.name,
@@ -50,10 +60,17 @@ class BookConfig:
             ),
             "publish_end_chapter": self.publish_end_chapter,
             "ai_generated": self.ai_generated,
+            "publish_times": [
+                publish_time.isoformat(timespec="minutes")
+                for publish_time in self.publish_times
+            ],
         }
 
     @classmethod
-    def from_dict(cls, value: dict[str, str | int]) -> "BookConfig":
+    def from_dict(cls, value: dict[str, object]) -> "BookConfig":
+        raw_publish_times = value.get("publish_times", [])
+        if not isinstance(raw_publish_times, list):
+            raise ValueError("publish_times must be a list")
         return cls(
             book_id=str(value["book_id"]),
             name=str(value["name"]),
@@ -73,6 +90,10 @@ class BookConfig:
                 else None
             ),
             ai_generated=bool(value.get("ai_generated", True)),
+            publish_times=tuple(
+                time.fromisoformat(str(publish_time))
+                for publish_time in raw_publish_times
+            ),
         )
 
 
@@ -118,6 +139,7 @@ class BookState:
     submitted_chapters: tuple[int, ...] = ()
     confirmation: BatchConfirmation | None = None
     last_error: str | None = None
+    last_failed_chapter: int | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -126,6 +148,7 @@ class BookState:
             "submitted_chapters": list(self.submitted_chapters),
             "confirmation": _confirmation_to_dict(self.confirmation),
             "last_error": self.last_error,
+            "last_failed_chapter": self.last_failed_chapter,
         }
 
     @classmethod
@@ -146,6 +169,11 @@ class BookState:
             ),
             last_error=(
                 str(value["last_error"]) if value.get("last_error") is not None else None
+            ),
+            last_failed_chapter=(
+                int(value["last_failed_chapter"])
+                if value.get("last_failed_chapter") is not None
+                else None
             ),
         )
 
