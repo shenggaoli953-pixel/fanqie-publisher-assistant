@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Do not modify novel scheduling, remote synchronization, browser automation, short-story publishing workflow, category suggestion rules, data models, or the `data/` file format.
-- Use `Microsoft YaHei UI` only at fixed, readable control sizes; do not use a thin font weight or viewport-scaled font size.
+- Use `Segoe UI` only at fixed, readable control sizes; do not use a thin font weight or viewport-scaled font size.
 - Keep all existing theme choices working and retain `ui-settings.json` persistence.
 - Keep the main publish action as the only `Primary.TButton` in each publishing surface.
 - Keep the extra-category limit at 7 and total category limit at 8.
@@ -45,10 +45,10 @@ Add this method to `UiFormattingTests` after `test_app_uses_the_quiet_writing_wo
         app = PublisherApp(root, Service(), object())
         style = ttk.Style(root)
 
-        self.assertEqual(app._header.cget("background"), "#202124")
-        self.assertEqual(style.lookup("Primary.TButton", "background"), "#E7653F")
+        self.assertEqual(app._header.cget("background"), "#FFFFFF")
+        self.assertEqual(style.lookup("Primary.TButton", "background"), "#1F1F1F")
         self.assertEqual(style.lookup("App.Treeview", "rowheight"), 38)
-        self.assertIn("Microsoft YaHei UI", style.lookup("App.Treeview", "font"))
+        self.assertIn("Segoe UI", style.lookup("App.Treeview", "font"))
 ```
 
 - [ ] **Step 2: Write the failing scroll-and-delete test**
@@ -107,26 +107,26 @@ git commit -m "test: describe refreshed workbench UI"
 
 - [ ] **Step 1: Replace the default palette values with the approved neutral workbench palette**
 
-Set the `简白橙` palette entries that drive the default workspace to:
+Set the `Codex 浅色` palette entries that drive the default workspace to:
 
 ```python
-        "canvas": "#F3F4F6",
+        "canvas": "#F7F7F8",
         "surface": "#FFFFFF",
         "sidebar": "#EAECF0",
-        "header": "#202124",
-        "header_status": "#303134",
-        "header_foreground": "#FFFFFF",
-        "text": "#202124",
-        "title": "#171717",
-        "muted": "#6B7280",
-        "section": "#374151",
-        "primary": "#E7653F",
-        "primary_active": "#CC5333",
-        "secondary": "#F6F7F9",
-        "entry_border": "#D5D9E0",
-        "table_heading": "#F0F2F5",
-        "table_selection": "#FCE2D9",
-        "focus": "#E7653F",
+        "header": "#FFFFFF",
+        "header_status": "#F0F0F0",
+        "header_foreground": "#1F1F1F",
+        "text": "#1F1F1F",
+        "title": "#1F1F1F",
+        "muted": "#707070",
+        "section": "#303030",
+        "primary": "#1F1F1F",
+        "primary_active": "#000000",
+        "secondary": "#F3F3F3",
+        "entry_border": "#E0E0E0",
+        "table_heading": "#F7F7F7",
+        "table_selection": "#EAEAEA",
+        "focus": "#5F5F5F",
 ```
 
 Keep all status keys (`pending`, `partial`, `submitted`, `over_limit`) and all theme dictionary keys so `_configure_styles()` remains total for every theme.
@@ -136,10 +136,10 @@ Keep all status keys (`pending`, `partial`, `submitted`, `over_limit`) and all t
 In `_configure_styles()`, keep the existing named styles but use these sizes:
 
 ```python
-        body_font = ("Microsoft YaHei UI", 10)
-        body_bold_font = ("Microsoft YaHei UI", 10, "bold")
-        title_font = ("Microsoft YaHei UI", 18, "bold")
-        table_font = ("Microsoft YaHei UI", 10)
+        body_font = ("Segoe UI", 10)
+        body_bold_font = ("Segoe UI", 10, "bold")
+        title_font = ("Segoe UI", 18, "bold")
+        table_font = ("Segoe UI", 10)
 ```
 
 Use those tuples for labels, entries, comboboxes, checkbuttons and treeviews. Configure `Title.TLabel` with `title_font`, `App.Treeview` with `rowheight=38` and `table_font`, and `App.Treeview.Heading` with `body_bold_font`. Keep all custom style names intact so existing tests and UI construction continue to use the same contracts.
@@ -154,7 +154,7 @@ Inside `_build_window()`:
         self._header = tk.Frame(self._root, background=palette["header"], height=56)
 ```
 
-Keep the title, theme selector, status label and progress bar in their existing order. Reduce their outer padding so the header is a compact toolbar. Keep the notebook and its tabs, but use `padx=16` and `pady=(10, 12)` for the main work area. In both `_build_novel_tab()` and `_build_short_story_tab()`, retain the sidebars and callbacks while applying one consistent `padding=(18, 18)` to sidebars and `padding=(24, 20)` to main surfaces.
+Keep the title, theme selector, status label and progress bar in their existing order. Reduce their outer padding so the header is a compact toolbar. Keep the notebook and its tabs, but use `padx=16` and `pady=(10, 12)` for the main work area. In both `_build_novel_tab()` and `_build_short_story_tab()`, retain the sidebars and callbacks while applying `padding=(18, 18)` to sidebars; use `padding=(24, 12)` for the novel work surface so both schedule tables remain usable at the minimum window size.
 
 - [ ] **Step 4: Run the visual and existing UI tests**
 
@@ -199,7 +199,7 @@ Replace the standalone listbox grid block with this structure:
             exportselection=False,
             borderwidth=0,
             activestyle="none",
-            font=("Microsoft YaHei UI", 10),
+            font=("Segoe UI", 10),
         )
         self._story_extra_list.grid(row=0, column=0, sticky="nsew")
         self._story_extra_scrollbar = ttk.Scrollbar(

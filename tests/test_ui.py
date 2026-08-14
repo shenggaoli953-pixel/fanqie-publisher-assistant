@@ -94,7 +94,7 @@ class UiFormattingTests(unittest.TestCase):
         app._remove_story_extra_category()
 
         self.assertEqual(app._story_extra_list.cget("height"), 4)
-        self.assertEqual(app._story_extra_scrollbar.cget("orient"), "vertical")
+        self.assertEqual(str(app._story_extra_scrollbar.cget("orient")), "vertical")
         self.assertEqual(app._story_extra_categories(), categories[:-1])
 
     def test_schedule_row_tag_gives_over_limit_precedence(self):
@@ -171,20 +171,20 @@ class UiFormattingTests(unittest.TestCase):
         self.addCleanup(root.destroy)
         app = PublisherApp(root, Service(), object())
 
-        self.assertEqual(app._header.cget("background"), "#202124")
+        self.assertEqual(app._header.cget("background"), "#FFFFFF")
         self.assertEqual(app._header_status.cget("width"), 18)
         self.assertEqual(
             ttk.Style(root).lookup("Primary.TButton", "background"),
-            "#E7653F",
+            "#1F1F1F",
         )
         self.assertEqual(
             ttk.Style(root).lookup("App.Treeview", "rowheight"),
             38,
         )
-        self.assertIn("Microsoft YaHei UI", ttk.Style(root).lookup("App.Treeview", "font"))
+        self.assertIn("Segoe UI", ttk.Style(root).lookup("App.Treeview", "font"))
         self.assertEqual(
             app._schedule.tag_configure("alternating-row")["background"],
-            "#F8F9FB",
+            "#FAFAFA",
         )
 
     def test_short_story_failure_keeps_browser_trace_out_of_header_status(self):
@@ -231,7 +231,7 @@ class UiFormattingTests(unittest.TestCase):
                 theme_settings_path=settings_path,
             )
 
-            self.assertEqual(app._theme_name_var.get(), "简白橙")
+            self.assertEqual(app._theme_name_var.get(), "Codex 浅色")
             self.assertIn("石墨夜", app._theme_box.cget("values"))
             app._theme_name_var.set("石墨夜")
             app._apply_selected_theme()
@@ -240,8 +240,32 @@ class UiFormattingTests(unittest.TestCase):
             self.assertEqual(app._books_list.cget("background"), "#242424")
             self.assertEqual(
                 json.loads(settings_path.read_text(encoding="utf-8")),
-                {"theme": "石墨夜"},
+                {"version": 2, "theme": "石墨夜"},
             )
+
+    def test_legacy_theme_preference_moves_to_codex_light(self):
+        class Service:
+            def list_books(self):
+                return []
+
+        with TemporaryDirectory() as temp_dir:
+            settings_path = Path(temp_dir) / "ui-settings.json"
+            settings_path.write_text(
+                json.dumps({"theme": "暖灰橙"}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            root = tk.Tk()
+            root.withdraw()
+            self.addCleanup(root.destroy)
+
+            app = PublisherApp(
+                root,
+                Service(),
+                object(),
+                theme_settings_path=settings_path,
+            )
+
+        self.assertEqual(app._theme_name_var.get(), "Codex 浅色")
 
     def test_minimum_window_keeps_schedule_panels_usable(self):
         class Service:

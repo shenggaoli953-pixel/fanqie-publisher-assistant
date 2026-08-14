@@ -41,47 +41,57 @@ _STATUS_LABELS = {
 _SHORT_STORY_CATEGORIES = SHORT_STORY_PRIMARY_CATEGORIES
 _SHORT_STORY_EXTRA_TAGS = SHORT_STORY_EXTRA_CATEGORIES
 
-_DEFAULT_UI_THEME = "简白橙"
+_DEFAULT_UI_THEME = "Codex 浅色"
+_UI_THEME_SETTINGS_VERSION = 2
+_LEGACY_UI_THEMES = {
+    "简白橙": _DEFAULT_UI_THEME,
+    "暖灰橙": _DEFAULT_UI_THEME,
+    "玫瑰灰": _DEFAULT_UI_THEME,
+    "石墨夜": "石墨夜",
+}
+_BODY_FONT = ("Segoe UI", 10)
+_BODY_BOLD_FONT = ("Segoe UI", 10, "bold")
+_TITLE_FONT = ("Segoe UI", 18, "bold")
 _UI_THEMES: dict[str, dict[str, str]] = {
-    "简白橙": {
-        "canvas": "#F6F6F4",
+    "Codex 浅色": {
+        "canvas": "#F7F7F8",
         "surface": "#FFFFFF",
-        "sidebar": "#F0F0EE",
-        "header": "#262626",
-        "header_status": "#383838",
-        "header_foreground": "#FFFFFF",
-        "text": "#262626",
-        "title": "#262626",
-        "muted": "#757575",
-        "sidebar_text": "#484848",
-        "section": "#3D3D3D",
-        "primary": "#FF6A3D",
-        "primary_active": "#E9572C",
-        "disabled_background": "#DEDEDA",
-        "disabled_foreground": "#858580",
-        "secondary": "#F3F3F1",
-        "secondary_foreground": "#444444",
-        "secondary_active": "#E7E7E4",
-        "entry_border": "#D9D9D4",
-        "info": "#F8F8F6",
-        "separator": "#E3E3DF",
-        "tab": "#ECECE9",
-        "tab_foreground": "#737373",
+        "sidebar": "#F0F0F0",
+        "header": "#FFFFFF",
+        "header_status": "#F0F0F0",
+        "header_foreground": "#1F1F1F",
+        "text": "#1F1F1F",
+        "title": "#1F1F1F",
+        "muted": "#707070",
+        "sidebar_text": "#404040",
+        "section": "#303030",
+        "primary": "#1F1F1F",
+        "primary_active": "#000000",
+        "disabled_background": "#E2E2E2",
+        "disabled_foreground": "#919191",
+        "secondary": "#F3F3F3",
+        "secondary_foreground": "#303030",
+        "secondary_active": "#E7E7E7",
+        "entry_border": "#E0E0E0",
+        "info": "#F8F8F8",
+        "separator": "#E7E7E7",
+        "tab": "#F2F2F2",
+        "tab_foreground": "#6E6E6E",
         "table": "#FFFFFF",
-        "table_heading": "#F1F1EF",
-        "table_border": "#E0E0DC",
-        "table_selection": "#FFE4D8",
-        "table_selection_foreground": "#5B2819",
-        "list": "#FAFAF8",
-        "list_foreground": "#303030",
-        "list_selection": "#FFE3D7",
-        "list_selection_foreground": "#5B2819",
-        "focus": "#FF8A66",
-        "alternate": "#F7F7F5",
-        "pending": "#99502F",
-        "partial": "#9B6800",
+        "table_heading": "#F7F7F7",
+        "table_border": "#E4E4E4",
+        "table_selection": "#EAEAEA",
+        "table_selection_foreground": "#1F1F1F",
+        "list": "#FAFAFA",
+        "list_foreground": "#282828",
+        "list_selection": "#EAEAEA",
+        "list_selection_foreground": "#1F1F1F",
+        "focus": "#5F5F5F",
+        "alternate": "#FAFAFA",
+        "pending": "#A14D32",
+        "partial": "#966200",
         "submitted": "#5D6B52",
-        "over_limit": "#AB3B35",
+        "over_limit": "#B53E3A",
     },
     "石墨夜": {
         "canvas": "#191919",
@@ -213,7 +223,11 @@ def _load_ui_theme(settings_path: Path | None) -> str:
         payload = json.loads(settings_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return _DEFAULT_UI_THEME
-    theme = payload.get("theme") if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        return _DEFAULT_UI_THEME
+    theme = payload.get("theme")
+    if payload.get("version") != _UI_THEME_SETTINGS_VERSION:
+        theme = _LEGACY_UI_THEMES.get(theme, _DEFAULT_UI_THEME)
     return theme if theme in _UI_THEMES else _DEFAULT_UI_THEME
 
 
@@ -341,37 +355,37 @@ class PublisherApp:
             "App.TLabel",
             background=palette["canvas"],
             foreground=palette["text"],
-            font=("Microsoft YaHei UI", 9),
+            font=_BODY_FONT,
         )
         style.configure(
             "Surface.TLabel",
             background=palette["surface"],
             foreground=palette["text"],
-            font=("Microsoft YaHei UI", 9),
+            font=_BODY_FONT,
         )
         style.configure(
             "Sidebar.TLabel",
             background=palette["sidebar"],
             foreground=palette["sidebar_text"],
-            font=("Microsoft YaHei UI", 9, "bold"),
+            font=_BODY_BOLD_FONT,
         )
         style.configure(
             "Title.TLabel",
             background=palette["surface"],
             foreground=palette["title"],
-            font=("Microsoft YaHei UI", 17, "bold"),
+            font=_TITLE_FONT,
         )
         style.configure(
             "Muted.TLabel",
             background=palette["surface"],
             foreground=palette["muted"],
-            font=("Microsoft YaHei UI", 9),
+            font=_BODY_FONT,
         )
         style.configure(
             "Section.TLabel",
             background=palette["surface"],
             foreground=palette["section"],
-            font=("Microsoft YaHei UI", 9, "bold"),
+            font=_BODY_BOLD_FONT,
         )
         style.configure(
             "Primary.TButton",
@@ -380,8 +394,8 @@ class PublisherApp:
             bordercolor=palette["primary"],
             lightcolor=palette["primary"],
             darkcolor=palette["primary"],
-            font=("Microsoft YaHei UI", 10, "bold"),
-            padding=(18, 9),
+            font=_BODY_BOLD_FONT,
+            padding=(18, 8),
         )
         style.map(
             "Primary.TButton",
@@ -398,7 +412,7 @@ class PublisherApp:
             bordercolor=palette["entry_border"],
             lightcolor=palette["surface"],
             darkcolor=palette["entry_border"],
-            font=("Microsoft YaHei UI", 9),
+            font=_BODY_FONT,
             padding=(12, 7),
         )
         style.map(
@@ -416,7 +430,8 @@ class PublisherApp:
             bordercolor=palette["entry_border"],
             lightcolor=palette["surface"],
             darkcolor=palette["entry_border"],
-            padding=(7, 5),
+            font=_BODY_FONT,
+            padding=(8, 6),
         )
         style.configure(
             "App.TCombobox",
@@ -424,7 +439,8 @@ class PublisherApp:
             foreground=palette["text"],
             background=palette["secondary"],
             bordercolor=palette["entry_border"],
-            padding=(6, 4),
+            font=_BODY_FONT,
+            padding=(7, 5),
         )
         style.map(
             "App.TCombobox",
@@ -435,7 +451,7 @@ class PublisherApp:
             "App.TCheckbutton",
             background=palette["surface"],
             foreground=palette["section"],
-            font=("Microsoft YaHei UI", 9),
+            font=_BODY_FONT,
         )
         style.map(
             "App.TCheckbutton",
@@ -455,13 +471,13 @@ class PublisherApp:
             "Info.TLabelframe.Label",
             background=palette["info"],
             foreground=palette["section"],
-            font=("Microsoft YaHei UI", 9, "bold"),
+            font=_BODY_BOLD_FONT,
         )
         style.configure(
             "Info.TLabel",
             background=palette["info"],
             foreground=palette["text"],
-            font=("Microsoft YaHei UI", 9),
+            font=_BODY_FONT,
         )
         style.configure("App.TSeparator", background=palette["separator"])
         style.configure("App.TNotebook", background=palette["canvas"], borderwidth=0)
@@ -469,8 +485,8 @@ class PublisherApp:
             "App.TNotebook.Tab",
             background=palette["tab"],
             foreground=palette["tab_foreground"],
-            padding=(21, 11),
-            font=("Microsoft YaHei UI", 10),
+            padding=(22, 10),
+            font=_BODY_FONT,
         )
         style.map(
             "App.TNotebook.Tab",
@@ -482,8 +498,8 @@ class PublisherApp:
             background=palette["table"],
             fieldbackground=palette["table"],
             foreground=palette["text"],
-            rowheight=34,
-            font=("Microsoft YaHei UI", 9),
+            rowheight=38,
+            font=_BODY_FONT,
             bordercolor=palette["table_border"],
             lightcolor=palette["table_border"],
             darkcolor=palette["table_border"],
@@ -495,7 +511,7 @@ class PublisherApp:
             bordercolor=palette["table_border"],
             lightcolor=palette["table_heading"],
             darkcolor=palette["table_heading"],
-            font=("Microsoft YaHei UI", 9, "bold"),
+            font=_BODY_BOLD_FONT,
             relief="flat",
         )
         style.map(
@@ -518,6 +534,7 @@ class PublisherApp:
             foreground=palette["header_foreground"],
             background=palette["header_status"],
             bordercolor=palette["header_status"],
+            font=_BODY_FONT,
             padding=(7, 4),
         )
         style.map(
@@ -538,7 +555,13 @@ class PublisherApp:
                 self._theme_settings_path.suffix + ".tmp"
             )
             temporary_path.write_text(
-                json.dumps({"theme": self._theme_name_var.get()}, ensure_ascii=False),
+                json.dumps(
+                    {
+                        "version": _UI_THEME_SETTINGS_VERSION,
+                        "theme": self._theme_name_var.get(),
+                    },
+                    ensure_ascii=False,
+                ),
                 encoding="utf-8",
             )
             temporary_path.replace(self._theme_settings_path)
@@ -592,7 +615,7 @@ class PublisherApp:
     def _build_window(self) -> None:
         palette = self._theme_palette()
         self._root.title("番茄创作发布助手")
-        self._root.geometry("1120x760+40+40")
+        self._root.geometry("1180x800+40+40")
         self._root.minsize(980, 680)
         self._root.configure(background=palette["canvas"])
         self._root.columnconfigure(0, weight=1)
@@ -601,7 +624,7 @@ class PublisherApp:
         style = ttk.Style(self._root)
         self._configure_styles(style)
 
-        self._header = tk.Frame(self._root, background=palette["header"], height=60)
+        self._header = tk.Frame(self._root, background=palette["header"], height=56)
         self._header.grid(row=0, column=0, sticky="ew")
         self._header.columnconfigure(2, weight=1)
         self._header.grid_propagate(False)
@@ -615,7 +638,7 @@ class PublisherApp:
                 image=self._header_icon,
                 background=palette["header"],
             )
-            self._header_icon_label.grid(row=0, column=0, padx=(22, 10), pady=10)
+            self._header_icon_label.grid(row=0, column=0, padx=(20, 9), pady=9)
         except tk.TclError:
             self._window_icon = None
         self._header_title_label = tk.Label(
@@ -623,9 +646,9 @@ class PublisherApp:
             text="番茄创作发布助手",
             background=palette["header"],
             foreground=palette["header_foreground"],
-            font=("Microsoft YaHei UI", 17, "bold"),
+            font=_TITLE_FONT,
         )
-        self._header_title_label.grid(row=0, column=1, padx=(0, 18), pady=11, sticky="w")
+        self._header_title_label.grid(row=0, column=1, padx=(0, 18), pady=8, sticky="w")
         self._theme_box = ttk.Combobox(
             self._header,
             textvariable=self._theme_name_var,
@@ -641,7 +664,7 @@ class PublisherApp:
             textvariable=self._task_status_var,
             background=palette["header_status"],
             foreground=palette["header_foreground"],
-            font=("Microsoft YaHei UI", 9),
+            font=_BODY_FONT,
             padx=12,
             pady=6,
             width=18,
@@ -654,10 +677,10 @@ class PublisherApp:
             length=120,
             style="Header.Horizontal.TProgressbar",
         )
-        self._task_progress.grid(row=0, column=5, padx=(8, 22))
+        self._task_progress.grid(row=0, column=5, padx=(8, 20))
 
         notebook = ttk.Notebook(self._root, style="App.TNotebook")
-        notebook.grid(row=1, column=0, sticky="nsew", padx=14, pady=(6, 8))
+        notebook.grid(row=1, column=0, sticky="nsew", padx=16, pady=(10, 12))
         novel_tab = ttk.Frame(notebook, style="App.TFrame")
         story_tab = ttk.Frame(notebook, style="App.TFrame")
         notebook.add(novel_tab, text="小说排程")
@@ -669,7 +692,7 @@ class PublisherApp:
         parent.columnconfigure(1, weight=1)
         parent.rowconfigure(0, weight=1)
 
-        books_frame = ttk.Frame(parent, style="Sidebar.TFrame", padding=(16, 16))
+        books_frame = ttk.Frame(parent, style="Sidebar.TFrame", padding=(18, 18))
         books_frame.grid(row=0, column=0, sticky="nsew")
         ttk.Label(books_frame, text="作品", style="Sidebar.TLabel").pack(anchor="w")
         self._books_list = tk.Listbox(
@@ -685,7 +708,7 @@ class PublisherApp:
             highlightcolor="#4F80B6",
             borderwidth=0,
             activestyle="none",
-            font=("Microsoft YaHei UI", 10),
+            font=_BODY_FONT,
         )
         self._configure_listbox_theme(self._books_list, self._theme_palette())
         self._books_list.pack(fill="both", expand=True, pady=(10, 10))
@@ -697,7 +720,7 @@ class PublisherApp:
             style="Secondary.TButton",
         ).pack(fill="x")
 
-        main_frame = ttk.Frame(parent, style="Surface.TFrame", padding=(22, 14))
+        main_frame = ttk.Frame(parent, style="Surface.TFrame", padding=(24, 12))
         main_frame.grid(row=0, column=1, sticky="nsew")
         main_frame.columnconfigure(6, weight=1)
         main_frame.rowconfigure(10, weight=1)
@@ -918,7 +941,7 @@ class PublisherApp:
     def _build_short_story_tab(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(1, weight=1)
         parent.rowconfigure(0, weight=1)
-        sidebar = ttk.Frame(parent, style="Sidebar.TFrame", padding=(16, 16))
+        sidebar = ttk.Frame(parent, style="Sidebar.TFrame", padding=(18, 18))
         sidebar.grid(row=0, column=0, sticky="nsew")
         ttk.Label(sidebar, text="短故事", style="Sidebar.TLabel").pack(anchor="w")
         self._stories_list = tk.Listbox(
@@ -934,7 +957,7 @@ class PublisherApp:
             highlightcolor="#4F80B6",
             borderwidth=0,
             activestyle="none",
-            font=("Microsoft YaHei UI", 10),
+            font=_BODY_FONT,
         )
         self._configure_listbox_theme(self._stories_list, self._theme_palette())
         self._stories_list.pack(fill="both", expand=True, pady=(10, 10))
@@ -1034,9 +1057,19 @@ class PublisherApp:
             textvariable=self._story_extra_count_var,
             style="Surface.TLabel",
         ).grid(row=7, column=0, sticky="nw", pady=(7, 4))
+        extra_list_frame = ttk.Frame(form, style="Surface.TFrame")
+        extra_list_frame.grid(
+            row=7,
+            column=1,
+            columnspan=2,
+            sticky="nsew",
+            padx=(12, 8),
+            pady=(7, 4),
+        )
+        extra_list_frame.columnconfigure(0, weight=1)
         self._story_extra_list = tk.Listbox(
-            form,
-            height=2,
+            extra_list_frame,
+            height=4,
             exportselection=False,
             background="#FAFBFD",
             foreground="#29394B",
@@ -1047,12 +1080,19 @@ class PublisherApp:
             highlightcolor="#4F80B6",
             borderwidth=0,
             activestyle="none",
-            font=("Microsoft YaHei UI", 9),
+            font=_BODY_FONT,
         )
         self._configure_listbox_theme(self._story_extra_list, self._theme_palette())
         self._story_extra_list.grid(
-            row=7, column=1, columnspan=2, sticky="ew", padx=(12, 8), pady=(7, 4)
+            row=0, column=0, sticky="nsew"
         )
+        self._story_extra_scrollbar = ttk.Scrollbar(
+            extra_list_frame,
+            orient="vertical",
+            command=self._story_extra_list.yview,
+        )
+        self._story_extra_scrollbar.grid(row=0, column=1, sticky="ns", padx=(6, 0))
+        self._story_extra_list.configure(yscrollcommand=self._story_extra_scrollbar.set)
         ttk.Button(
             form,
             text="移除所选",
