@@ -53,6 +53,7 @@ _LEGACY_UI_THEMES = {
 _BODY_FONT = ("Segoe UI Variable Text", 10)
 _BODY_BOLD_FONT = ("Segoe UI Variable Text Semibold", 10)
 _TITLE_FONT = ("Segoe UI Variable Display Semib", 18)
+_CONTEXT_TITLE_FONT = ("Segoe UI Variable Display Semib", 15)
 _UI_THEMES: dict[str, dict[str, str]] = {
     "Codex 浅色": {
         "canvas": "#F7F7F8",
@@ -458,6 +459,8 @@ class PublisherApp:
         style.configure("App.TFrame", background=palette["canvas"])
         style.configure("Surface.TFrame", background=palette["surface"])
         style.configure("Sidebar.TFrame", background=palette["sidebar"])
+        style.configure("Context.TFrame", background=palette["info"])
+        style.configure("Config.TFrame", background=palette["info"])
         style.configure(
             "App.TLabel",
             background=palette["canvas"],
@@ -471,6 +474,18 @@ class PublisherApp:
             font=_BODY_FONT,
         )
         style.configure(
+            "Config.TLabel",
+            background=palette["info"],
+            foreground=palette["text"],
+            font=_BODY_FONT,
+        )
+        style.configure(
+            "ConfigMuted.TLabel",
+            background=palette["info"],
+            foreground=palette["muted"],
+            font=_BODY_FONT,
+        )
+        style.configure(
             "Sidebar.TLabel",
             background=palette["sidebar"],
             foreground=palette["sidebar_text"],
@@ -481,6 +496,24 @@ class PublisherApp:
             background=palette["surface"],
             foreground=palette["title"],
             font=_TITLE_FONT,
+        )
+        style.configure(
+            "ContextTitle.TLabel",
+            background=palette["info"],
+            foreground=palette["title"],
+            font=_CONTEXT_TITLE_FONT,
+        )
+        style.configure(
+            "ContextMeta.TLabel",
+            background=palette["info"],
+            foreground=palette["muted"],
+            font=_BODY_FONT,
+        )
+        style.configure(
+            "ContextState.TLabel",
+            background=palette["info"],
+            foreground=palette["section"],
+            font=_BODY_BOLD_FONT,
         )
         style.configure(
             "Muted.TLabel",
@@ -563,6 +596,17 @@ class PublisherApp:
         style.map(
             "App.TCheckbutton",
             background=[("active", palette["surface"])],
+            foreground=[("active", palette["title"])],
+        )
+        style.configure(
+            "Config.TCheckbutton",
+            background=palette["info"],
+            foreground=palette["section"],
+            font=_BODY_FONT,
+        )
+        style.map(
+            "Config.TCheckbutton",
+            background=[("active", palette["info"])],
             foreground=[("active", palette["title"])],
         )
         style.configure(
@@ -688,6 +732,10 @@ class PublisherApp:
             background=palette["header"],
             foreground=palette["header_foreground"],
         )
+        self._header_subtitle_label.configure(
+            background=palette["header"],
+            foreground=palette["muted"],
+        )
         if self._header_icon_label is not None:
             self._header_icon_label.configure(background=palette["header"])
         self._header_status.configure(
@@ -714,7 +762,7 @@ class PublisherApp:
         style = ttk.Style(self._root)
         self._configure_styles(style)
 
-        self._header = tk.Frame(self._root, background=palette["header"], height=56)
+        self._header = tk.Frame(self._root, background=palette["header"], height=64)
         self._header.grid(row=0, column=0, sticky="ew")
         self._header.columnconfigure(2, weight=1)
         self._header.grid_propagate(False)
@@ -728,7 +776,7 @@ class PublisherApp:
                 image=self._header_icon,
                 background=palette["header"],
             )
-            self._header_icon_label.grid(row=0, column=0, padx=(20, 9), pady=9)
+            self._header_icon_label.grid(row=0, column=0, rowspan=2, padx=(20, 9), pady=10)
         except tk.TclError:
             self._window_icon = None
         self._header_title_label = tk.Label(
@@ -738,7 +786,15 @@ class PublisherApp:
             foreground=palette["header_foreground"],
             font=_TITLE_FONT,
         )
-        self._header_title_label.grid(row=0, column=1, padx=(0, 18), pady=8, sticky="w")
+        self._header_title_label.grid(row=0, column=1, padx=(0, 18), pady=(7, 0), sticky="sw")
+        self._header_subtitle_label = tk.Label(
+            self._header,
+            text="创作工作台",
+            background=palette["header"],
+            foreground=palette["muted"],
+            font=_BODY_FONT,
+        )
+        self._header_subtitle_label.grid(row=1, column=1, padx=(0, 18), pady=(0, 8), sticky="nw")
         self._theme_box = ttk.Combobox(
             self._header,
             textvariable=self._theme_name_var,
@@ -747,7 +803,7 @@ class PublisherApp:
             width=9,
             style="Header.TCombobox",
         )
-        self._theme_box.grid(row=0, column=3, padx=(8, 8))
+        self._theme_box.grid(row=0, column=3, rowspan=2, padx=(8, 8))
         self._theme_box.bind("<<ComboboxSelected>>", self._apply_selected_theme)
         self._header_status = tk.Label(
             self._header,
@@ -760,14 +816,14 @@ class PublisherApp:
             width=18,
             anchor="w",
         )
-        self._header_status.grid(row=0, column=4, padx=8, sticky="e")
+        self._header_status.grid(row=0, column=4, rowspan=2, padx=8, sticky="e")
         self._task_progress = ttk.Progressbar(
             self._header,
             mode="indeterminate",
             length=120,
             style="Header.Horizontal.TProgressbar",
         )
-        self._task_progress.grid(row=0, column=5, padx=(8, 20))
+        self._task_progress.grid(row=0, column=5, rowspan=2, padx=(8, 20))
 
         notebook = ttk.Notebook(self._root, style="App.TNotebook")
         notebook.grid(row=1, column=0, sticky="nsew", padx=16, pady=(10, 12))
@@ -810,137 +866,151 @@ class PublisherApp:
             style="Secondary.TButton",
         ).pack(fill="x")
 
-        main_frame = ttk.Frame(parent, style="Surface.TFrame", padding=(24, 12))
+        main_frame = ttk.Frame(parent, style="Surface.TFrame", padding=(22, 12))
         main_frame.grid(row=0, column=1, sticky="nsew")
         main_frame.columnconfigure(6, weight=1)
-        main_frame.rowconfigure(10, weight=1)
-        main_frame.rowconfigure(12, weight=1)
+        main_frame.rowconfigure(6, weight=1)
+        main_frame.rowconfigure(8, weight=1)
 
-        ttk.Label(main_frame, textvariable=self._book_name_var, style="Title.TLabel").grid(
-            row=0, column=0, columnspan=4, sticky="w"
-        )
-        ttk.Label(main_frame, textvariable=self._source_var, style="Muted.TLabel").grid(
-            row=1, column=0, columnspan=7, sticky="w", pady=(2, 6)
-        )
-        ttk.Separator(main_frame, style="App.TSeparator").grid(
-            row=2, column=0, columnspan=7, sticky="ew", pady=(0, 4)
-        )
+        self._book_context = ttk.Frame(main_frame, style="Context.TFrame", padding=(14, 5))
+        self._book_context.grid(row=0, column=0, columnspan=7, sticky="ew", pady=(0, 8))
+        self._book_context.columnconfigure(0, weight=1)
+        ttk.Label(
+            self._book_context,
+            textvariable=self._book_name_var,
+            style="ContextTitle.TLabel",
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            self._book_context,
+            textvariable=self._publish_state_var,
+            style="ContextState.TLabel",
+        ).grid(row=0, column=1, sticky="e", padx=(18, 0))
 
         ttk.Label(main_frame, text="排程设置", style="Section.TLabel").grid(
-            row=3, column=0, columnspan=7, sticky="w", pady=(0, 6)
+            row=1, column=0, columnspan=7, sticky="w", pady=(0, 6)
         )
-        ttk.Label(main_frame, text="每日限制方式", style="Surface.TLabel").grid(
-            row=4, column=0, sticky="w"
+        self._settings_band = ttk.Frame(main_frame, style="Config.TFrame", padding=(12, 4))
+        self._settings_band.grid(row=2, column=0, columnspan=7, sticky="ew")
+        self._settings_band.columnconfigure(6, weight=1)
+        ttk.Label(self._settings_band, text="每日限制方式", style="Config.TLabel").grid(
+            row=0, column=0, sticky="w"
         )
         self._mode_box = ttk.Combobox(
-            main_frame,
+            self._settings_band,
             textvariable=self._mode_var,
             values=(PublishMode.WORDS.value, PublishMode.CHAPTERS.value),
             state="readonly",
             width=14,
             style="App.TCombobox",
         )
-        self._mode_box.grid(row=4, column=1, sticky="w", padx=(8, 18))
-        ttk.Label(main_frame, text="限制值", style="Surface.TLabel").grid(
-            row=4, column=2, sticky="w"
+        self._mode_box.grid(row=0, column=1, sticky="w", padx=(8, 18))
+        ttk.Label(self._settings_band, text="限制值", style="Config.TLabel").grid(
+            row=0, column=2, sticky="w"
         )
         self._limit_entry = ttk.Entry(
-            main_frame,
+            self._settings_band,
             textvariable=self._limit_var,
             width=10,
             style="App.TEntry",
         )
-        self._limit_entry.grid(row=4, column=3, sticky="w", padx=(8, 0))
+        self._limit_entry.grid(row=0, column=3, sticky="w", padx=(8, 0))
         ttk.Label(
-            main_frame,
+            self._settings_band,
             text="发布时间（HH:MM）",
-            style="Surface.TLabel",
-        ).grid(row=4, column=4, sticky="w", padx=(18, 0))
+            style="Config.TLabel",
+        ).grid(row=0, column=4, sticky="w", padx=(18, 0))
         self._time_entry = ttk.Entry(
-            main_frame,
+            self._settings_band,
             textvariable=self._time_var,
             width=8,
             style="App.TEntry",
         )
-        self._time_entry.grid(row=4, column=5, sticky="w", padx=(8, 0))
+        self._time_entry.grid(row=0, column=5, sticky="w", padx=(8, 0))
         ttk.Button(
-            main_frame,
+            self._settings_band,
             text="保存并重排",
             command=self._save_policy,
             style="Secondary.TButton",
         ).grid(
-            row=4, column=6, sticky="e", padx=(18, 0)
+            row=0, column=6, sticky="e", padx=(18, 0)
         )
 
         ttk.Label(main_frame, text="发布范围", style="Section.TLabel").grid(
-            row=5, column=0, columnspan=7, sticky="w", pady=(8, 5)
+            row=3, column=0, columnspan=7, sticky="w", pady=(10, 5)
         )
-        ttk.Label(main_frame, text="首个发布日期", style="Surface.TLabel").grid(
-            row=6, column=0, sticky="w"
+        self._range_band = ttk.Frame(main_frame, style="Config.TFrame", padding=(12, 4))
+        self._range_band.grid(row=4, column=0, columnspan=7, sticky="ew")
+        self._range_band.columnconfigure(6, weight=1)
+        ttk.Label(self._range_band, text="首个发布日期", style="Config.TLabel").grid(
+            row=0, column=0, sticky="w"
         )
         ttk.Entry(
-            main_frame,
+            self._range_band,
             textvariable=self._start_date_var,
             width=12,
             style="App.TEntry",
         ).grid(
-            row=6, column=1, sticky="w", padx=(8, 8)
+            row=0, column=1, sticky="w", padx=(8, 8)
         )
         ttk.Button(
-            main_frame,
+            self._range_band,
             text="选择日期",
             command=lambda: self._open_date_picker(self._start_date_var, self._root),
             style="Secondary.TButton",
-        ).grid(row=6, column=2, sticky="w")
+        ).grid(row=0, column=2, sticky="w")
         ttk.Button(
-            main_frame,
+            self._range_band,
             text="暂不发布",
             command=self._pause_publishing,
             style="Secondary.TButton",
         ).grid(
-            row=6, column=3, sticky="w", padx=(8, 0)
+            row=0, column=3, sticky="w", padx=(8, 0)
         )
-        ttk.Label(main_frame, textvariable=self._publish_state_var, style="Muted.TLabel").grid(
-            row=6, column=4, columnspan=3, sticky="w", padx=(18, 0)
+        ttk.Label(
+            self._range_band,
+            textvariable=self._publish_state_var,
+            style="ConfigMuted.TLabel",
+        ).grid(
+            row=0, column=4, columnspan=3, sticky="w", padx=(18, 0)
         )
 
-        ttk.Label(main_frame, text="起始章节", style="Surface.TLabel").grid(
-            row=7, column=0, sticky="w", pady=(4, 0)
+        ttk.Label(self._range_band, text="起始章节", style="Config.TLabel").grid(
+            row=1, column=0, sticky="w", pady=(0, 0)
         )
         ttk.Entry(
-            main_frame,
+            self._range_band,
             textvariable=self._chapter_start_var,
             width=8,
             style="App.TEntry",
         ).grid(
-            row=7, column=1, sticky="w", padx=(8, 18), pady=(4, 0)
+            row=1, column=1, sticky="w", padx=(8, 18), pady=(0, 0)
         )
-        ttk.Label(main_frame, text="结束章节（含）", style="Surface.TLabel").grid(
-            row=7, column=2, sticky="w", pady=(4, 0)
+        ttk.Label(self._range_band, text="结束章节（含）", style="Config.TLabel").grid(
+            row=1, column=2, sticky="w", pady=(0, 0)
         )
         ttk.Entry(
-            main_frame,
+            self._range_band,
             textvariable=self._chapter_end_var,
             width=8,
             style="App.TEntry",
         ).grid(
-            row=7, column=3, sticky="w", padx=(8, 0), pady=(4, 0)
+            row=1, column=3, sticky="w", padx=(8, 0), pady=(0, 0)
         )
-        ttk.Label(main_frame, text="留空不截止", style="Muted.TLabel").grid(
-            row=7, column=4, sticky="w", padx=(18, 0), pady=(4, 0)
+        ttk.Label(self._range_band, text="留空不截止", style="ConfigMuted.TLabel").grid(
+            row=1, column=4, sticky="w", padx=(18, 0), pady=(0, 0)
         )
         ttk.Checkbutton(
-            main_frame,
+            self._range_band,
             text="AI生成：是",
             variable=self._ai_generated_var,
-            style="App.TCheckbutton",
-        ).grid(row=7, column=5, columnspan=2, sticky="w", padx=(18, 0), pady=(4, 0))
+            style="Config.TCheckbutton",
+        ).grid(row=1, column=5, columnspan=2, sticky="w", padx=(18, 0), pady=(0, 0))
 
         ttk.Label(main_frame, text="发布排程", style="Section.TLabel").grid(
-            row=9, column=0, columnspan=7, sticky="nw", pady=(6, 4)
+            row=5, column=0, columnspan=7, sticky="nw", pady=(6, 4)
         )
         table_frame = ttk.Frame(main_frame, style="Surface.TFrame")
-        table_frame.grid(row=10, column=0, columnspan=7, sticky="nsew", pady=(0, 10))
+        table_frame.grid(row=6, column=0, columnspan=7, sticky="nsew", pady=(0, 8))
         table_frame.columnconfigure(0, weight=1)
         table_frame.rowconfigure(0, weight=1)
         self._schedule = ttk.Treeview(
@@ -969,10 +1039,10 @@ class PublisherApp:
         self._schedule.configure(yscrollcommand=scrollbar.set)
 
         ttk.Label(main_frame, textvariable=self._detail_date_var, style="Section.TLabel").grid(
-            row=11, column=0, columnspan=7, sticky="nw", pady=(0, 6)
+            row=7, column=0, columnspan=7, sticky="nw", pady=(0, 6)
         )
         detail_frame = ttk.Frame(main_frame, style="Surface.TFrame")
-        detail_frame.grid(row=12, column=0, columnspan=7, sticky="nsew", pady=(0, 10))
+        detail_frame.grid(row=8, column=0, columnspan=7, sticky="nsew", pady=(0, 8))
         detail_frame.columnconfigure(0, weight=1)
         detail_frame.rowconfigure(0, weight=1)
         self._schedule_detail = ttk.Treeview(
@@ -1005,7 +1075,7 @@ class PublisherApp:
         self._schedule_detail.configure(yscrollcommand=detail_scrollbar.set)
 
         actions = ttk.Frame(main_frame, style="Surface.TFrame")
-        actions.grid(row=13, column=0, columnspan=7, sticky="ew", pady=(2, 0))
+        actions.grid(row=9, column=0, columnspan=7, sticky="ew", pady=(2, 0))
         self._open_edge_button = ttk.Button(
             actions,
             text="打开番茄后台",
@@ -1063,18 +1133,20 @@ class PublisherApp:
         form.grid(row=0, column=1, sticky="nsew")
         form.columnconfigure(1, weight=1)
         form.columnconfigure(3, weight=1)
+        self._story_context = ttk.Frame(form, style="Context.TFrame", padding=(16, 12))
+        self._story_context.grid(row=0, column=0, columnspan=4, sticky="ew", pady=(0, 12))
         ttk.Label(
-            form,
+            self._story_context,
             text="短故事发布",
-            style="Title.TLabel",
-        ).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 4))
+            style="ContextTitle.TLabel",
+        ).grid(row=0, column=0, sticky="w")
         ttk.Label(
-            form,
-            text="填写内容信息后，在同一个 Edge 工作窗口中继续发布。",
-            style="Muted.TLabel",
-        ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(0, 14))
+            self._story_context,
+            text="内容与发布安排",
+            style="ContextMeta.TLabel",
+        ).grid(row=1, column=0, sticky="w", pady=(2, 0))
         ttk.Separator(form, style="App.TSeparator").grid(
-            row=2, column=0, columnspan=4, sticky="ew", pady=(0, 8)
+            row=1, column=0, columnspan=4, sticky="ew", pady=(0, 8)
         )
 
         fields = (
@@ -1082,7 +1154,7 @@ class PublisherApp:
             ("正文文件或目录", self._story_source_var),
             ("封面图片", self._story_cover_var),
         )
-        for row, (label, variable) in enumerate(fields, start=3):
+        for row, (label, variable) in enumerate(fields, start=2):
             ttk.Label(form, text=label, style="Surface.TLabel").grid(
                 row=row, column=0, sticky="w", pady=7
             )
@@ -1090,7 +1162,7 @@ class PublisherApp:
                 row=row, column=1, columnspan=2, sticky="ew", padx=(12, 8), pady=7
             )
         source_actions = ttk.Frame(form, style="Surface.TFrame")
-        source_actions.grid(row=4, column=3, sticky="e", pady=7)
+        source_actions.grid(row=3, column=3, sticky="e", pady=7)
         ttk.Button(
             source_actions,
             text="文件",
@@ -1109,11 +1181,11 @@ class PublisherApp:
             command=self._choose_story_cover,
             style="Secondary.TButton",
         ).grid(
-            row=5, column=3, sticky="e", pady=7
+            row=4, column=3, sticky="e", pady=7
         )
 
         ttk.Label(form, text="主分类", style="Surface.TLabel").grid(
-            row=6, column=0, sticky="w", pady=7
+            row=5, column=0, sticky="w", pady=7
         )
         ttk.Combobox(
             form,
@@ -1121,12 +1193,12 @@ class PublisherApp:
             values=_SHORT_STORY_CATEGORIES,
             state="readonly",
             style="App.TCombobox",
-        ).grid(row=6, column=1, sticky="ew", padx=(12, 8), pady=7)
+        ).grid(row=5, column=1, sticky="ew", padx=(12, 8), pady=7)
         ttk.Label(form, text="添加分类", style="Surface.TLabel").grid(
-            row=6, column=2, sticky="e", pady=7
+            row=5, column=2, sticky="e", pady=7
         )
         extra_picker = ttk.Frame(form, style="Surface.TFrame")
-        extra_picker.grid(row=6, column=3, sticky="ew", padx=(8, 0), pady=7)
+        extra_picker.grid(row=5, column=3, sticky="ew", padx=(8, 0), pady=7)
         extra_picker.columnconfigure(0, weight=1)
         ttk.Combobox(
             extra_picker,
@@ -1146,10 +1218,10 @@ class PublisherApp:
             form,
             textvariable=self._story_extra_count_var,
             style="Surface.TLabel",
-        ).grid(row=7, column=0, sticky="nw", pady=(7, 4))
+        ).grid(row=6, column=0, sticky="nw", pady=(7, 4))
         extra_list_frame = ttk.Frame(form, style="Surface.TFrame")
         extra_list_frame.grid(
-            row=7,
+            row=6,
             column=1,
             columnspan=2,
             sticky="nsew",
@@ -1188,30 +1260,30 @@ class PublisherApp:
             text="移除所选",
             command=self._remove_story_extra_category,
             style="Secondary.TButton",
-        ).grid(row=7, column=3, sticky="e", pady=(7, 4))
+        ).grid(row=6, column=3, sticky="e", pady=(7, 4))
 
         ttk.Checkbutton(
             form,
             text="AI 生成：是",
             variable=self._story_ai_var,
             style="App.TCheckbutton",
-        ).grid(row=8, column=1, sticky="w", padx=(12, 0), pady=(10, 4))
+        ).grid(row=7, column=1, sticky="w", padx=(12, 0), pady=(10, 4))
         ttk.Button(
             form,
             text="重新识别",
             command=lambda: self._update_story_preview(force_category_suggestion=True),
             style="Secondary.TButton",
-        ).grid(row=8, column=0, sticky="w", pady=(10, 4))
+        ).grid(row=7, column=0, sticky="w", pady=(10, 4))
         ttk.Checkbutton(
             form,
             text="我已阅读番茄短故事发布事项",
             variable=self._story_consent_var,
             style="App.TCheckbutton",
-        ).grid(row=8, column=2, columnspan=2, sticky="w", pady=(10, 4))
+        ).grid(row=7, column=2, columnspan=2, sticky="w", pady=(10, 4))
 
         info = ttk.LabelFrame(form, text="正文预览", padding=14, style="Info.TLabelframe")
-        info.grid(row=9, column=0, columnspan=4, sticky="nsew", pady=(18, 12))
-        form.rowconfigure(9, weight=1)
+        info.grid(row=8, column=0, columnspan=4, sticky="nsew", pady=(18, 12))
+        form.rowconfigure(8, weight=1)
         ttk.Label(
             info,
             textvariable=self._story_info_var,
@@ -1221,7 +1293,7 @@ class PublisherApp:
         ).pack(anchor="nw", fill="x")
 
         actions = ttk.Frame(form, style="Surface.TFrame")
-        actions.grid(row=10, column=0, columnspan=4, sticky="ew")
+        actions.grid(row=9, column=0, columnspan=4, sticky="ew")
         ttk.Button(
             actions,
             text="保存设置",

@@ -155,9 +155,14 @@ class UiFormattingTests(unittest.TestCase):
         self.assertEqual(app._schedule.cget("height"), 4)
         self.assertEqual(app._schedule_detail.cget("height"), 5)
         main_frame = app._schedule.master.master
-        self.assertEqual(main_frame.grid_rowconfigure(10)["weight"], 1)
-        self.assertEqual(main_frame.grid_rowconfigure(12)["weight"], 1)
-        self.assertEqual(main_frame.grid_slaves(row=8), [])
+        self.assertEqual(app._header.cget("height"), 64)
+        self.assertEqual(app._header_subtitle_label.cget("text"), "创作工作台")
+        self.assertEqual(app._book_context.cget("style"), "Context.TFrame")
+        self.assertEqual(app._story_context.cget("style"), "Context.TFrame")
+        self.assertEqual(app._settings_band.cget("style"), "Config.TFrame")
+        self.assertEqual(app._range_band.cget("style"), "Config.TFrame")
+        self.assertEqual(main_frame.grid_rowconfigure(6)["weight"], 1)
+        self.assertEqual(main_frame.grid_rowconfigure(8)["weight"], 1)
         self.assertEqual(app._publish_button.cget("style"), "Primary.TButton")
         self.assertEqual(app._story_publish_button.cget("style"), "Primary.TButton")
         self.assertEqual(
@@ -180,6 +185,10 @@ class UiFormattingTests(unittest.TestCase):
         self.assertEqual(
             ttk.Style(root).lookup("Primary.TButton", "background"),
             "#1F1F1F",
+        )
+        self.assertEqual(
+            ttk.Style(root).lookup("Context.TFrame", "background"),
+            "#F8F8F8",
         )
         self.assertEqual(
             ttk.Style(root).lookup("App.Treeview", "rowheight"),
