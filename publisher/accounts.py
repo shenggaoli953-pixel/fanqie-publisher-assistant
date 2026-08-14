@@ -8,6 +8,7 @@ from uuid import uuid4
 class AccountProfile:
     profile_id: str
     display_name: str
+    debug_port: int = 9222
     guide_seen: bool = False
 
     def __post_init__(self) -> None:
@@ -15,11 +16,14 @@ class AccountProfile:
             raise ValueError("账号标识无效")
         if not self.display_name.strip():
             raise ValueError("账号名称不能为空")
+        if not 1024 <= self.debug_port <= 65535:
+            raise ValueError("账号调试端口无效")
 
     def to_dict(self) -> dict[str, object]:
         return {
             "profile_id": self.profile_id,
             "display_name": self.display_name,
+            "debug_port": self.debug_port,
             "guide_seen": self.guide_seen,
         }
 
@@ -30,6 +34,7 @@ class AccountProfile:
         return cls(
             profile_id=str(value["profile_id"]),
             display_name=str(value["display_name"]),
+            debug_port=int(value.get("debug_port", 9222)),
             guide_seen=bool(value.get("guide_seen", False)),
         )
 
@@ -55,7 +60,11 @@ class AccountRegistry:
 
     def add(self, display_name: str) -> AccountProfile:
         profiles, _active_id = self._load()
-        profile = AccountProfile(uuid4().hex, self._normalized_name(display_name))
+        profile = AccountProfile(
+            uuid4().hex,
+            self._normalized_name(display_name),
+            debug_port=self._next_debug_port(profiles),
+        )
         self._save([*profiles, profile], profile.profile_id)
         return profile
 
@@ -113,6 +122,8 @@ class AccountRegistry:
         profiles = [AccountProfile.from_dict(item) for item in raw_profiles]
         if len({profile.profile_id for profile in profiles}) != len(profiles):
             raise ValueError("账号标识重复")
+        if len({profile.debug_port for profile in profiles}) != len(profiles):
+            raise ValueError("账号调试端口重复")
         active_id = str(payload.get("active_profile_id", self.LEGACY_ID))
         self._find(profiles, active_id)
         return profiles, active_id
@@ -144,3 +155,11 @@ class AccountRegistry:
         if not value:
             raise ValueError("账号名称不能为空")
         return value
+
+    @staticmethod
+    def _next_debug_port(profiles: list[AccountProfile]) -> int:
+        used_ports = {profile.debug_port for profile in profiles}
+        for port in range(9223, 65536):
+            if port not in used_ports:
+                return port
+        raise RuntimeError("没有可用的账号调试端口")

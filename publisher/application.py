@@ -23,5 +23,6 @@ class ApplicationContext:
         )
 
     def gateway_factory(self) -> Callable[[], EdgePublisherGateway]:
-        profile_dir = self.accounts.edge_profile_dir(self.active_profile().profile_id)
-        return lambda: EdgePublisherGateway(profile_dir)
+        profile = self.active_profile()
+        profile_dir = self.accounts.edge_profile_dir(profile.profile_id)
+        return lambda: EdgePublisherGateway(profile_dir, cdp_port=profile.debug_port)

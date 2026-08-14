@@ -208,14 +208,18 @@ def interpret_publish_response(payload: object) -> tuple[PublishOutcome, str]:
 
 
 def edge_launch_arguments(
-    edge_path: Path, profile_dir: Path, author_url: str
+    edge_path: Path,
+    profile_dir: Path,
+    author_url: str,
+    *,
+    cdp_port: int = 9222,
 ) -> list[str]:
     return [
         str(edge_path),
         "--new-window",
         "--window-position=100,80",
         "--remote-debugging-address=127.0.0.1",
-        "--remote-debugging-port=9222",
+        f"--remote-debugging-port={cdp_port}",
         f"--user-data-dir={profile_dir.resolve()}",
         author_url,
     ]
@@ -316,12 +320,14 @@ class EdgePublisherGateway:
         profile_dir: Path,
         author_url: str = _DEFAULT_AUTHOR_URL,
         selectors: EdgeSelectors | None = None,
-        cdp_endpoint: str = "http://127.0.0.1:9222",
+        cdp_endpoint: str | None = None,
+        cdp_port: int = 9222,
     ) -> None:
         self._profile_dir = profile_dir
         self._author_url = author_url
         self._selectors = selectors or EdgeSelectors()
-        self._cdp_endpoint = cdp_endpoint
+        self._cdp_port = cdp_port
+        self._cdp_endpoint = cdp_endpoint or f"http://127.0.0.1:{cdp_port}"
         self._playwright = None
         self._browser = None
         self._context = None
@@ -358,6 +364,7 @@ class EdgePublisherGateway:
                     edge_path,
                     self._profile_dir,
                     self._author_url,
+                    cdp_port=self._cdp_port,
                 ),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,

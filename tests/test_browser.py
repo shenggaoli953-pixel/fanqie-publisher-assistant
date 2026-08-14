@@ -1028,6 +1028,16 @@ class BrowserTests(unittest.TestCase):
         self.assertIn("--remote-debugging-address=127.0.0.1", arguments)
         self.assertIn(f"--user-data-dir={profile_dir.resolve()}", arguments)
 
+    def test_edge_launch_arguments_use_the_account_debug_port(self):
+        arguments = edge_launch_arguments(
+            Path(r"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"),
+            Path("fanqie-edge-profile"),
+            "https://fanqienovel.com/writer/zone/",
+            cdp_port=9444,
+        )
+
+        self.assertIn("--remote-debugging-port=9444", arguments)
+
     def test_typo_prompt_prefers_continue_publishing_over_editing(self):
         self.assertEqual(
             choose_continue_action({"修改", "继续发布", "取消"}),

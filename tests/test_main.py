@@ -48,3 +48,7 @@ class MainTests(unittest.TestCase):
                 context.gateway_factory()()._profile_dir,
                 context.accounts.edge_profile_dir(account.profile_id),
             )
+            self.assertIn(
+                str(account.debug_port),
+                context.gateway_factory()()._cdp_endpoint,
+            )

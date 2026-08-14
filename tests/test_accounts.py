@@ -31,7 +31,8 @@ class AccountRegistryTests(unittest.TestCase):
     def test_new_profile_has_isolated_workspace_and_edge_profile(self):
         registry = AccountRegistry(self.data_dir)
 
-        account = registry.add("作家 B")
+        first = registry.add("作家 B")
+        account = registry.add("作家 C")
 
         self.assertEqual(
             registry.workspace_dir(account.profile_id),
@@ -42,6 +43,8 @@ class AccountRegistryTests(unittest.TestCase):
             self.data_dir / "accounts" / account.profile_id / "edge-profile",
         )
         self.assertEqual(registry.active().profile_id, account.profile_id)
+        self.assertNotEqual(first.debug_port, account.debug_port)
+        self.assertGreater(first.debug_port, 9222)
 
     def test_selected_profile_and_guide_state_survive_reopen(self):
         registry = AccountRegistry(self.data_dir)
