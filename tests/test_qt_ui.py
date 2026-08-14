@@ -57,13 +57,15 @@ class QtUiTests(unittest.TestCase):
         self.assertEqual(window.novel_splitter.count(), 2)
         self.assertEqual(window.novel_operation_button.text(), "发布全部排程")
 
-    def test_short_story_publish_controls_appear_before_the_body_preview(self):
+    def test_publish_controls_stay_outside_the_scrollable_editors(self):
         window = PublisherWindow(FakeService(), object())
         self.addCleanup(window.close)
 
-        self.assertLess(
-            window.story_editor_layout.indexOf(window.story_operation_section),
-            window.story_editor_layout.indexOf(window.story_preview_section),
+        self.assertFalse(
+            window.story_editor.isAncestorOf(window.story_operation_section)
+        )
+        self.assertFalse(
+            window.novel_editor.isAncestorOf(window.novel_operation_section)
         )
 
     def test_operation_picker_changes_the_primary_operation_label(self):
