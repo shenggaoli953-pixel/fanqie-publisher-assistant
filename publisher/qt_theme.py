@@ -17,6 +17,7 @@ THEMES: dict[str, dict[str, str]] = {
         "primary": "#1F1F1F",
         "primary_text": "#FFFFFF",
         "primary_hover": "#000000",
+        "focus": "#3A3A3A",
         "secondary": "#F3F3F3",
         "secondary_hover": "#E8E8E8",
         "selection": "#E8E8E8",
@@ -33,6 +34,7 @@ THEMES: dict[str, dict[str, str]] = {
         "primary": "#2A2A2A",
         "primary_text": "#FFFFFF",
         "primary_hover": "#000000",
+        "focus": "#353535",
         "secondary": "#F5F5F6",
         "secondary_hover": "#E9E9EA",
         "selection": "#ECECED",
@@ -49,6 +51,7 @@ THEMES: dict[str, dict[str, str]] = {
         "primary": "#F1F1F1",
         "primary_text": "#202020",
         "primary_hover": "#DCDCDC",
+        "focus": "#BEBEBE",
         "secondary": "#393939",
         "secondary_hover": "#484848",
         "selection": "#454545",
@@ -65,6 +68,7 @@ THEMES: dict[str, dict[str, str]] = {
         "primary": "#FFFFFF",
         "primary_text": "#111111",
         "primary_hover": "#DEDEDE",
+        "focus": "#D0D0D0",
         "secondary": "#252525",
         "secondary_hover": "#313131",
         "selection": "#363636",
@@ -78,12 +82,13 @@ THEMES: dict[str, dict[str, str]] = {
         "text": "#ECECEC",
         "muted": "#B4B4B4",
         "border": "#4B4B4B",
-        "primary": "#B94D34",
+        "primary": "#D46A4C",
         "primary_text": "#FFFFFF",
-        "primary_hover": "#A9412B",
-        "secondary": "#393939",
+        "primary_hover": "#BC563D",
+        "focus": "#E09A86",
+        "secondary": "#383838",
         "secondary_hover": "#494949",
-        "selection": "#4B3934",
+        "selection": "#3B3B3B",
         "status": "#383838",
     },
     "Codex 暖灰": {
@@ -97,6 +102,7 @@ THEMES: dict[str, dict[str, str]] = {
         "primary": "#403D39",
         "primary_text": "#FFFFFF",
         "primary_hover": "#242220",
+        "focus": "#4D4A45",
         "secondary": "#F0EFED",
         "secondary_hover": "#E5E3E0",
         "selection": "#EAE8E4",
@@ -143,10 +149,12 @@ def apply_theme(theme_name: str) -> None:
         f"""
         * {{
             color: {palette['text']};
-            font-family: 'Segoe UI Variable Text', 'Segoe UI';
+            font-family: 'Microsoft YaHei UI', 'Segoe UI Variable Text', 'Segoe UI';
             font-size: 10pt;
         }}
         QMainWindow, QDialog, QWidget#workspace {{ background: {palette['canvas']}; }}
+        QWidget#contentPane {{ background: {palette['canvas']}; }}
+        QScrollArea {{ background: {palette['canvas']}; border: 0; }}
         QFrame#header {{ background: {palette['header']}; border-bottom: 1px solid {palette['border']}; }}
         QFrame#sidebar {{ background: {palette['sidebar']}; border-right: 1px solid {palette['border']}; }}
         QLabel#brand {{ font-size: 16pt; font-weight: 600; }}
@@ -160,6 +168,7 @@ def apply_theme(theme_name: str) -> None:
             padding: 7px 11px;
         }}
         QToolButton:hover, QPushButton:hover {{ background: {palette['secondary_hover']}; }}
+        QToolButton:disabled, QPushButton:disabled {{ color: {palette['muted']}; }}
         QPushButton[primary='true'] {{
             background: {palette['primary']}; color: {palette['primary_text']};
             border-color: {palette['primary']}; font-weight: 600;
@@ -168,10 +177,39 @@ def apply_theme(theme_name: str) -> None:
         QListWidget {{ background: transparent; border: 0; outline: 0; padding: 8px; }}
         QListWidget::item {{ border-radius: 4px; padding: 9px 10px; margin: 2px 0; }}
         QListWidget::item:selected {{ background: {palette['selection']}; font-weight: 600; }}
+        QLineEdit, QPlainTextEdit, QComboBox, QDateEdit, QSpinBox {{
+            background: {palette['surface']}; border: 1px solid {palette['border']};
+            border-radius: 4px; padding: 7px 9px; selection-background-color: {palette['selection']};
+        }}
+        QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus, QDateEdit:focus, QSpinBox:focus {{
+            border: 1px solid {palette['focus']};
+        }}
+        QComboBox::drop-down {{ border: 0; width: 24px; }}
+        QComboBox QAbstractItemView {{
+            background: {palette['surface']}; border: 1px solid {palette['border']};
+            selection-background-color: {palette['selection']};
+        }}
+        QCheckBox {{ spacing: 8px; }}
+        QCheckBox::indicator {{
+            width: 16px; height: 16px; background: {palette['surface']};
+            border: 1px solid {palette['border']}; border-radius: 3px;
+        }}
+        QCheckBox::indicator:checked {{ background: {palette['primary']}; border-color: {palette['primary']}; }}
         QMenu {{ background: {palette['surface']}; border: 1px solid {palette['border']}; padding: 5px; }}
         QMenu::item {{ padding: 7px 24px 7px 10px; border-radius: 3px; }}
         QMenu::item:selected {{ background: {palette['selection']}; }}
         QProgressBar {{ background: {palette['status']}; border: 0; border-radius: 3px; }}
         QProgressBar::chunk {{ background: {palette['primary']}; border-radius: 3px; }}
+        QTableWidget {{
+            background: {palette['surface']}; border: 1px solid {palette['border']};
+            gridline-color: {palette['border']}; selection-background-color: {palette['selection']};
+        }}
+        QHeaderView::section {{
+            background: {palette['secondary']}; border: 0; border-bottom: 1px solid {palette['border']};
+            padding: 7px; font-weight: 600;
+        }}
+        QScrollBar:vertical {{ background: transparent; width: 10px; margin: 4px; }}
+        QScrollBar::handle:vertical {{ background: {palette['border']}; border-radius: 4px; min-height: 24px; }}
+        QScrollBar::handle:vertical:hover {{ background: {palette['muted']}; }}
         """
     )

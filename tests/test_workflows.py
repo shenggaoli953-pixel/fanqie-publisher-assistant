@@ -624,6 +624,60 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(report.error, "分类未保存")
         self.assertEqual(Publisher.submitted, ["待发布甲"])
 
+    def test_short_story_queue_stops_before_the_next_story_when_requested(self):
+        stories = [
+            ShortStoryConfig(
+                story_id="story-1",
+                name="待发布甲",
+                source_path=Path("1.txt"),
+                cover_path=Path("1.png"),
+                primary_category="其他",
+                consent_confirmed=True,
+            ),
+            ShortStoryConfig(
+                story_id="story-2",
+                name="待发布乙",
+                source_path=Path("2.txt"),
+                cover_path=Path("2.png"),
+                primary_category="其他",
+                consent_confirmed=True,
+            ),
+        ]
+        control = RunControl()
+
+        class Service:
+            def list_short_stories(self):
+                return stories
+
+            def get_short_story(self, story_id: str):
+                return next(story for story in stories if story.story_id == story_id)
+
+            def update_short_story(self, _story) -> None:
+                pass
+
+        class Publisher:
+            submitted: list[str] = []
+
+            def __init__(self, _gateway) -> None:
+                pass
+
+            def published_titles(self):
+                return set()
+
+            def submit(self, config):
+                self.submitted.append(config.name)
+                control.request_stop()
+                return ShortStorySubmissionResult(True)
+
+        report = publish_all_short_stories(
+            Service(), object(), publisher_factory=Publisher, control=control
+        )
+
+        self.assertFalse(report.success)
+        self.assertTrue(report.cancelled)
+        self.assertEqual(report.submitted_names, ("待发布甲",))
+        self.assertEqual(Publisher.submitted, ["待发布甲"])
+
 
 if __name__ == "__main__":
     unittest.main()

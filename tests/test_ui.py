@@ -19,6 +19,7 @@ from publisher.models import (
     ScheduledDay,
 )
 from publisher.updates import UpdateReport, UpdateStatus
+from publisher.version import APP_VERSION
 from publisher.workflows import NovelOperationReport, ShortStoryQueueReport
 from publisher.ui import (
     PublisherApp,
@@ -823,7 +824,7 @@ class UiFormattingTests(unittest.TestCase):
 
         export.assert_called_once_with(
             destination,
-                version="0.4.1",
+            version=APP_VERSION,
             state={"book_id": "book-1"},
             schedule=[("schedule", "book-1")],
         )

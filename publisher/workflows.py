@@ -68,10 +68,11 @@ class ShortStoryQueueReport:
     failed_name: str | None = None
     error: str | None = None
     requires_user_action: bool = False
+    cancelled: bool = False
 
     @property
     def success(self) -> bool:
-        return self.failed_name is None and self.error is None
+        return not self.cancelled and self.failed_name is None and self.error is None
 
 
 def sync_novel_status(service, gateway, book_id: str) -> SyncReport:
@@ -577,6 +578,7 @@ def publish_all_short_stories(
     *,
     publisher_factory=ShortStoryPublisher,
     on_progress: Callable[[str], None] | None = None,
+    control: RunControl | None = None,
 ) -> ShortStoryQueueReport:
     progress = on_progress or (lambda _message: None)
     publisher = publisher_factory(gateway)
@@ -586,6 +588,11 @@ def publish_all_short_stories(
     skipped: list[str] = []
 
     for config in service.list_short_stories():
+        if control is not None and control.stop_requested():
+            progress("任务已停止，未开始下一篇短故事")
+            return ShortStoryQueueReport(
+                tuple(submitted), tuple(skipped), cancelled=True
+            )
         if config.name in published_titles:
             skipped.append(config.name)
             continue

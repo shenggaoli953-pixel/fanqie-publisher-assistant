@@ -1,7 +1,7 @@
 from pathlib import Path
 import sys
 
-from publisher.ui import run_app
+from publisher.qt_ui import run_app
 
 
 def application_data_dir(script_path: Path, executable_path: Path | None = None) -> Path:
