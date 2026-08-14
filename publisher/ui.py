@@ -83,7 +83,7 @@ _BODY_FONT = ("Segoe UI Variable Text", 10)
 _BODY_BOLD_FONT = ("Segoe UI Variable Text Semibold", 10)
 _TITLE_FONT = ("Segoe UI Variable Display Semib", 18)
 _CONTEXT_TITLE_FONT = ("Segoe UI Variable Display Semib", 15)
-_APP_VERSION = "0.2.0"
+_APP_VERSION = "0.3.0"
 _UI_THEMES: dict[str, dict[str, str]] = {
     "Codex 浅色": {
         "canvas": "#F7F7F8",
@@ -1832,8 +1832,8 @@ class PublisherApp:
         dialog = tk.Toplevel(self._root)
         dialog.title(title)
         dialog.transient(self._root)
-        dialog.geometry("560x360")
-        dialog.minsize(480, 300)
+        dialog.geometry("620x400")
+        dialog.minsize(500, 330)
         ttk.Label(dialog, text="番茄创作发布助手", style="Title.TLabel").pack(
             anchor="w", padx=22, pady=(20, 8)
         )
@@ -1841,9 +1841,10 @@ class PublisherApp:
             dialog,
             text=(
                 "1. 选择本地账号，并在该账号自己的 Edge 窗口完成登录。\n\n"
-                "2. 添加作品后，先核对发布清单，再开始排程发布。\n\n"
-                "3. 停止任务会等待当前章节结束，不会启动下一章。\n\n"
-                "4. 反馈问题时请导出诊断或活动记录；不要发送账号、验证码、Cookie、正文或 Edge 配置。\n\n"
+                "2. 添加作品后，先核对发布清单；顶部可选择定时、立即、草稿、改正文或改排期。\n\n"
+                "3. 每项任务只读取一次后台章节状态；停止任务会等待当前章节结束，不会启动下一章。\n\n"
+                "4. 平台页面无法可靠判断时会停止；请在 Edge 中处理需要人工确认的页面。\n\n"
+                "5. 反馈问题时请导出诊断或活动记录；不要发送账号、验证码、Cookie、正文或 Edge 配置。\n\n"
                 f"当前版本：{_APP_VERSION}"
             ),
             justify="left",

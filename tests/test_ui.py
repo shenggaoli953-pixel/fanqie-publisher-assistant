@@ -821,7 +821,7 @@ class UiFormattingTests(unittest.TestCase):
 
         export.assert_called_once_with(
             destination,
-            version="0.2.0",
+                version="0.3.0",
             state={"book_id": "book-1"},
             schedule=[("schedule", "book-1")],
         )
