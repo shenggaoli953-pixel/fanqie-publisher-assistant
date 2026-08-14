@@ -3,11 +3,18 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from publisher.models import BookConfig, BookState, PublishMode
+from publisher.models import BookConfig, BookState, NovelOperation, PublishMode
 from publisher.repository import JsonRepository
 
 
 class ModelTests(unittest.TestCase):
+    def test_novel_operation_names_are_stable(self):
+        self.assertEqual(NovelOperation.SCHEDULED.value, "scheduled")
+        self.assertEqual(NovelOperation.IMMEDIATE.value, "immediate")
+        self.assertEqual(NovelOperation.DRAFT.value, "draft")
+        self.assertEqual(NovelOperation.EDIT_CONTENT.value, "edit-content")
+        self.assertEqual(NovelOperation.RESCHEDULE.value, "reschedule")
+
     def test_config_round_trip_preserves_editable_policy(self):
         config = BookConfig(
             book_id="robot",

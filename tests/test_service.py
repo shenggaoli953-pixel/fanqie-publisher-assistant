@@ -137,6 +137,21 @@ class ServiceTests(unittest.TestCase):
         ]
         self.assertEqual(scheduled_numbers, [1, 2])
 
+    def test_selected_source_chapters_honor_the_saved_range(self):
+        self.service.update_policy(
+            "robot",
+            mode=PublishMode.CHAPTERS,
+            limit=1,
+            publish_time=time(0, 0),
+            publish_start_date=date(2026, 7, 27),
+            next_chapter=2,
+            publish_end_chapter=3,
+        )
+
+        chapters = self.service.selected_source_chapters("robot")
+
+        self.assertEqual([chapter.number for chapter in chapters], [2, 3])
+
     def test_policy_can_update_the_ai_declaration(self):
         self.service.update_policy(
             "robot",

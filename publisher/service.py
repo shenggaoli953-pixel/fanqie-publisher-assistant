@@ -90,6 +90,9 @@ class PublishingService:
         state = self._get_state(book_id)
         return state.last_failed_chapter, state.last_error
 
+    def selected_source_chapters(self, book_id: str) -> list[Chapter]:
+        return self._contiguous_source_chapters(self.get_book(book_id))
+
     def next_pending_day(
         self, book_id: str, remote_chapters: list[RemoteChapter] | None = None
     ) -> ScheduledDay:

@@ -9,6 +9,14 @@ class PublishMode(StrEnum):
     CHAPTERS = "chapters"
 
 
+class NovelOperation(StrEnum):
+    SCHEDULED = "scheduled"
+    IMMEDIATE = "immediate"
+    DRAFT = "draft"
+    EDIT_CONTENT = "edit-content"
+    RESCHEDULE = "reschedule"
+
+
 @dataclass(frozen=True)
 class BookConfig:
     book_id: str
