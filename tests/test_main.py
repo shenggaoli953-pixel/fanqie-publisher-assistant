@@ -1,7 +1,9 @@
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 
 from main import application_data_dir
+from publisher.application import ApplicationContext
 
 
 class MainTests(unittest.TestCase):
@@ -29,3 +31,20 @@ class MainTests(unittest.TestCase):
             application_data_dir(project_dir / "main.py", executable),
             project_dir / "data",
         )
+
+    def test_context_switches_service_and_gateway_to_selected_profile(self):
+        with TemporaryDirectory() as temp_dir:
+            context = ApplicationContext(Path(temp_dir) / "data")
+            account = context.accounts.add("作家 B")
+
+            context.switch(account.profile_id)
+
+            self.assertEqual(context.active_profile().profile_id, account.profile_id)
+            self.assertEqual(
+                context.service()._repository._data_dir,
+                context.accounts.workspace_dir(account.profile_id),
+            )
+            self.assertEqual(
+                context.gateway_factory()()._profile_dir,
+                context.accounts.edge_profile_dir(account.profile_id),
+            )
