@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from publisher.browser import EdgePublisherGateway, PreflightStatus, PublishDraft
 from publisher.chapters import ChapterParseError, discover_project, read_chapter_body
+from publisher.diagnostics import write_diagnostic_report
 from publisher.models import BookConfig, PublishMode, RemoteChapter, ScheduledDay
 from publisher.service import PublishingService
 from publisher.short_story import (
@@ -54,6 +55,7 @@ _BODY_FONT = ("Segoe UI Variable Text", 10)
 _BODY_BOLD_FONT = ("Segoe UI Variable Text Semibold", 10)
 _TITLE_FONT = ("Segoe UI Variable Display Semib", 18)
 _CONTEXT_TITLE_FONT = ("Segoe UI Variable Display Semib", 15)
+_APP_VERSION = "0.2.0"
 _UI_THEMES: dict[str, dict[str, str]] = {
     "Codex 浅色": {
         "canvas": "#F7F7F8",
@@ -349,6 +351,30 @@ def parse_publish_end_chapter(value: str) -> int | None:
     return int(normalized) if normalized else None
 
 
+def parse_publish_times(value: str) -> tuple[time, ...]:
+    normalized = value.strip().translate(
+        str.maketrans({"，": ",", "；": ",", ";": ",", "、": ","})
+    )
+    if not normalized:
+        raise ValueError("请至少填写一个发布时间")
+    parsed: list[time] = []
+    for part in normalized.split(","):
+        pieces = part.strip().split(":")
+        if len(pieces) != 2:
+            raise ValueError("发布时间应为 HH:MM，可用逗号分隔多个时间")
+        try:
+            parsed.append(time(int(pieces[0]), int(pieces[1])))
+        except ValueError as error:
+            raise ValueError("发布时间应为 HH:MM，可用逗号分隔多个时间") from error
+    publish_times = tuple(parsed)
+    if (
+        len(set(publish_times)) != len(publish_times)
+        or tuple(sorted(publish_times)) != publish_times
+    ):
+        raise ValueError("发布时间不能重复，且必须按从早到晚排列")
+    return publish_times
+
+
 def asset_path(name: str) -> Path:
     root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
     return root / "assets" / name
@@ -407,6 +433,23 @@ def format_publish_confirmation(day: ScheduledDay, ai_generated: bool) -> str:
     )
 
 
+def format_publish_preview_rows(days: list[ScheduledDay]) -> list[tuple[str, str, str, str, str]]:
+    rows: list[tuple[str, str, str, str, str]] = []
+    for day in days:
+        status = "超限" if day.over_limit else _STATUS_LABELS.get(day.status, day.status)
+        for chapter in day.chapters:
+            rows.append(
+                (
+                    f"第{chapter.number}章",
+                    chapter.title,
+                    str(chapter.character_count),
+                    day.publish_at.strftime("%Y-%m-%d %H:%M"),
+                    status,
+                )
+            )
+    return rows
+
+
 class PublisherApp:
     def __init__(
         self,
@@ -435,6 +478,7 @@ class PublisherApp:
         self._book_name_var = tk.StringVar(value="未选择作品")
         self._source_var = tk.StringVar()
         self._detail_date_var = tk.StringVar(value="当天章节")
+        self._failure_var = tk.StringVar()
         self._task_status_var = tk.StringVar(value="就绪")
         self._theme_name_var = tk.StringVar(value=_load_ui_theme(theme_settings_path))
         self._story_name_var = tk.StringVar()
@@ -916,13 +960,13 @@ class PublisherApp:
         self._limit_entry.grid(row=0, column=3, sticky="w", padx=(8, 0))
         ttk.Label(
             self._settings_band,
-            text="发布时间（HH:MM）",
+            text="发布时间（可多个）",
             style="Config.TLabel",
         ).grid(row=0, column=4, sticky="w", padx=(18, 0))
         self._time_entry = ttk.Entry(
             self._settings_band,
             textvariable=self._time_var,
-            width=8,
+            width=22,
             style="App.TEntry",
         )
         self._time_entry.grid(row=0, column=5, sticky="w", padx=(8, 0))
@@ -1090,6 +1134,30 @@ class PublisherApp:
             style="Secondary.TButton",
         )
         self._sync_button.pack(side="left", padx=(8, 0))
+        self._preview_button = ttk.Button(
+            actions,
+            text="查看发布清单",
+            command=self._open_publish_preview,
+            style="Secondary.TButton",
+        )
+        self._preview_button.pack(side="left", padx=(8, 0))
+        self._failure_label = ttk.Label(
+            actions,
+            textvariable=self._failure_var,
+            style="Muted.TLabel",
+        )
+        self._recovery_button = ttk.Button(
+            actions,
+            text="从失败处继续",
+            command=self._start_recovery_publish,
+            style="Secondary.TButton",
+        )
+        self._diagnostic_button = ttk.Button(
+            actions,
+            text="导出诊断",
+            command=self._export_diagnostics,
+            style="Secondary.TButton",
+        )
         self._publish_button = ttk.Button(
             actions,
             text="发布全部排程",
@@ -1600,6 +1668,95 @@ class PublisherApp:
 
         self._start_task("正在读取番茄章节列表", operation, done)
 
+    def _open_publish_preview(self) -> None:
+        if self._selected_book_id is None:
+            messagebox.showinfo("请选择作品", "请先从左侧选择本地作品。", parent=self._root)
+            return
+        days = self._service.get_schedule(self._selected_book_id)
+        if not days:
+            messagebox.showinfo(
+                "暂无发布清单",
+                "请先设置首个发布日期并保存排程。",
+                parent=self._root,
+            )
+            return
+
+        dialog = tk.Toplevel(self._root)
+        dialog.title("发布清单")
+        dialog.transient(self._root)
+        dialog.geometry("900x520")
+        dialog.minsize(720, 360)
+        dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(1, weight=1)
+        ttk.Label(
+            dialog,
+            text="发布前核对章节、字数、时间与状态；不会读取或显示正文。",
+            style="App.TLabel",
+        ).grid(row=0, column=0, sticky="w", padx=18, pady=(16, 10))
+        frame = ttk.Frame(dialog, style="Surface.TFrame")
+        frame.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 12))
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
+        table = ttk.Treeview(
+            frame,
+            columns=("number", "title", "count", "time", "status"),
+            show="headings",
+            style="App.Treeview",
+        )
+        for column, label, width in (
+            ("number", "章节", 88),
+            ("title", "标题", 300),
+            ("count", "字数", 90),
+            ("time", "发布时间", 160),
+            ("status", "状态", 90),
+        ):
+            table.heading(column, text=label)
+            table.column(column, width=width, anchor="w", stretch=column == "title")
+        for row in format_publish_preview_rows(days):
+            table.insert("", tk.END, values=row)
+        table.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=table.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        table.configure(yscrollcommand=scrollbar.set)
+        ttk.Button(
+            dialog,
+            text="关闭",
+            command=dialog.destroy,
+            style="Secondary.TButton",
+        ).grid(row=2, column=0, sticky="e", padx=18, pady=(0, 16))
+
+    def _start_recovery_publish(self) -> None:
+        self._start_publish_novel()
+
+    def _export_diagnostics(self) -> None:
+        if self._selected_book_id is None:
+            messagebox.showinfo("请选择作品", "请先从左侧选择本地作品。", parent=self._root)
+            return
+        destination = filedialog.asksaveasfilename(
+            parent=self._root,
+            title="导出诊断信息",
+            defaultextension=".json",
+            initialfile="fanqie-publisher-diagnostic.json",
+            filetypes=(("JSON 文件", "*.json"),),
+        )
+        if not destination:
+            return
+        try:
+            report = write_diagnostic_report(
+                Path(destination),
+                version=_APP_VERSION,
+                state=self._service.get_book_state(self._selected_book_id),
+                schedule=self._service.get_schedule(self._selected_book_id),
+            )
+        except (OSError, KeyError, ValueError) as error:
+            messagebox.showerror("导出失败", str(error), parent=self._root)
+            return
+        messagebox.showinfo(
+            "诊断已导出",
+            f"已保存诊断信息：{report.name}\n文件不包含正文、标题、路径、账号或登录信息。",
+            parent=self._root,
+        )
+
     def _start_publish_novel(self) -> None:
         if self._selected_book_id is None:
             messagebox.showinfo("请选择作品", "请先从左侧选择本地作品。", parent=self._root)
@@ -1726,7 +1883,12 @@ class PublisherApp:
         self._source_var.set(str(book.source_dir))
         self._mode_var.set(book.mode.value)
         self._limit_var.set(str(book.limit))
-        self._time_var.set(book.publish_time.isoformat(timespec="minutes"))
+        self._time_var.set(
+            ", ".join(
+                publish_time.isoformat(timespec="minutes")
+                for publish_time in book.effective_publish_times
+            )
+        )
         self._start_date_var.set(
             book.publish_start_date.isoformat()
             if book.publish_start_date is not None
@@ -1742,7 +1904,24 @@ class PublisherApp:
         self._publish_state_var.set(
             "暂不发布" if book.publish_start_date is None else "已设置自动排程"
         )
+        self._update_failure_controls(book_id)
         self._refresh_schedule()
+
+    def _update_failure_controls(self, book_id: str) -> None:
+        failure_status = getattr(self._service, "failure_status", None)
+        failed_chapter, error = (
+            failure_status(book_id) if callable(failure_status) else (None, None)
+        )
+        if failed_chapter is None or not error:
+            self._failure_var.set("")
+            self._failure_label.pack_forget()
+            self._recovery_button.pack_forget()
+            self._diagnostic_button.pack_forget()
+            return
+        self._failure_var.set(f"第{failed_chapter}章未完成")
+        self._failure_label.pack(side="left", padx=(12, 0))
+        self._recovery_button.pack(side="left", padx=(8, 0))
+        self._diagnostic_button.pack(side="left", padx=(8, 0))
 
     def _refresh_schedule(self) -> None:
         self._schedule.delete(*self._schedule.get_children())
@@ -1790,11 +1969,13 @@ class PublisherApp:
         if self._selected_book_id is None:
             return
         try:
+            publish_times = parse_publish_times(self._time_var.get())
             self._service.update_policy(
                 self._selected_book_id,
                 mode=PublishMode(self._mode_var.get()),
                 limit=int(self._limit_var.get()),
-                publish_time=time.fromisoformat(self._time_var.get()),
+                publish_time=publish_times[0],
+                publish_times=publish_times,
                 publish_start_date=parse_publish_start_date(self._start_date_var.get()),
                 next_chapter=int(self._chapter_start_var.get()),
                 publish_end_chapter=parse_publish_end_chapter(self._chapter_end_var.get()),
@@ -1892,11 +2073,13 @@ class PublisherApp:
 
         def create_book() -> None:
             try:
+                publish_times = parse_publish_times(values["time"].get())
                 config = BookConfig(
                     book_id=uuid4().hex,
                     name=values["name"].get().strip(),
                     source_dir=Path(values["source"].get()),
-                    publish_time=time.fromisoformat(values["time"].get()),
+                    publish_time=publish_times[0],
+                    publish_times=publish_times,
                     mode=PublishMode(values["mode"].get()),
                     limit=int(values["limit"].get()),
                     next_chapter=int(values["start"].get()),
@@ -1924,7 +2107,7 @@ class PublisherApp:
                 ("起始章节", "start"),
                 ("限制方式", "mode"),
                 ("限制值", "limit"),
-                ("发布时间", "time"),
+                ("发布时间（可多个）", "time"),
                 ("首个发布日期（留空暂停）", "publish_start_date"),
                 ("结束章节（含，留空不截止）", "publish_end_chapter"),
             )

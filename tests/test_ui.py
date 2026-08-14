@@ -18,11 +18,13 @@ from publisher.ui import (
     _TITLE_FONT,
     _UI_THEMES,
     format_publish_confirmation,
+    format_publish_preview_rows,
     format_schedule_detail_title,
     format_schedule_detail_rows,
     format_schedule_rows,
     parse_publish_end_chapter,
     parse_publish_start_date,
+    parse_publish_times,
     schedule_row_tag,
 )
 
@@ -164,6 +166,10 @@ class UiFormattingTests(unittest.TestCase):
         self.assertEqual(main_frame.grid_rowconfigure(6)["weight"], 1)
         self.assertEqual(main_frame.grid_rowconfigure(8)["weight"], 1)
         self.assertEqual(app._publish_button.cget("style"), "Primary.TButton")
+        self.assertEqual(app._time_entry.cget("width"), 22)
+        self.assertEqual(app._preview_button.cget("text"), "查看发布清单")
+        self.assertEqual(app._recovery_button.cget("text"), "从失败处继续")
+        self.assertEqual(app._diagnostic_button.cget("text"), "导出诊断")
         self.assertEqual(app._story_publish_button.cget("style"), "Primary.TButton")
         self.assertEqual(
             app._schedule.tag_configure("submitted")["foreground"],
@@ -646,6 +652,118 @@ class UiFormattingTests(unittest.TestCase):
         self.assertIsNone(parse_publish_end_chapter(""))
         self.assertEqual(parse_publish_end_chapter("30"), 30)
 
+    def test_parse_publish_times_normalizes_common_separators(self):
+        self.assertEqual(
+            parse_publish_times("8:00，12:00;20:00"),
+            (time(8, 0), time(12, 0), time(20, 0)),
+        )
+        with self.assertRaisesRegex(ValueError, "发布时间"):
+            parse_publish_times("12:00,08:00")
+        with self.assertRaisesRegex(ValueError, "发布时间"):
+            parse_publish_times("08:00,08:00")
+
+    def test_save_policy_passes_the_complete_publish_time_list(self):
+        class Service:
+            def list_books(self):
+                return []
+
+            def update_policy(self, _book_id, **kwargs) -> None:
+                self.kwargs = kwargs
+
+        root = tk.Tk()
+        root.withdraw()
+        self.addCleanup(root.destroy)
+        service = Service()
+        app = PublisherApp(root, service, object())
+        app._selected_book_id = "book-1"
+        app._mode_var.set(PublishMode.CHAPTERS.value)
+        app._limit_var.set("3")
+        app._time_var.set("08:00，12:00")
+        app._start_date_var.set("2026-08-15")
+        app._chapter_start_var.set("1")
+        app._chapter_end_var.set("")
+        app._load_book = lambda _book_id: None
+
+        app._save_policy()
+
+        self.assertEqual(service.kwargs["publish_time"], time(8, 0))
+        self.assertEqual(
+            service.kwargs["publish_times"],
+            (time(8, 0), time(12, 0)),
+        )
+
+    def test_load_book_shows_recovery_controls_for_a_recorded_failure(self):
+        book = BookConfig(
+            book_id="book-1",
+            name="测试作品",
+            source_dir=Path("."),
+            publish_time=time(8, 0),
+            mode=PublishMode.CHAPTERS,
+            limit=1,
+            next_chapter=1,
+            publish_start_date=date(2026, 8, 15),
+        )
+
+        class Service:
+            def list_books(self):
+                return []
+
+            def get_book(self, _book_id: str) -> BookConfig:
+                return book
+
+            def get_schedule(self, _book_id: str):
+                return []
+
+            def failure_status(self, _book_id: str):
+                return 8, "network error"
+
+        root = tk.Tk()
+        root.withdraw()
+        self.addCleanup(root.destroy)
+        app = PublisherApp(root, Service(), object())
+
+        app._load_book(book.book_id)
+
+        self.assertEqual(app._failure_var.get(), "第8章未完成")
+        self.assertEqual(app._recovery_button.winfo_manager(), "pack")
+        self.assertEqual(app._diagnostic_button.winfo_manager(), "pack")
+
+    def test_export_diagnostics_uses_only_state_and_schedule(self):
+        class Service:
+            def list_books(self):
+                return []
+
+            def get_book_state(self, book_id: str):
+                return {"book_id": book_id}
+
+            def get_schedule(self, book_id: str):
+                return [("schedule", book_id)]
+
+        root = tk.Tk()
+        root.withdraw()
+        self.addCleanup(root.destroy)
+        app = PublisherApp(root, Service(), object())
+        app._selected_book_id = "book-1"
+        destination = Path("C:/temp/fanqie-diagnostic.json")
+
+        with (
+            patch(
+                "publisher.ui.filedialog.asksaveasfilename",
+                return_value=str(destination),
+            ),
+            patch("publisher.ui.write_diagnostic_report", return_value=destination) as export,
+            patch("publisher.ui.messagebox.showinfo") as show_info,
+        ):
+            app._export_diagnostics()
+
+        export.assert_called_once_with(
+            destination,
+            version="0.2.0",
+            state={"book_id": "book-1"},
+            schedule=[("schedule", "book-1")],
+        )
+        show_info.assert_called_once()
+
     def test_format_rows_summarize_every_chapter_number_for_a_day(self):
         chapters = (
             Chapter(Path("第082章-合规负责人.txt"), 82, "她拒绝当合规负责人", 5715, "hash"),
@@ -662,6 +780,25 @@ class UiFormattingTests(unittest.TestCase):
         self.assertEqual(
             format_schedule_rows([day]),
             [("2026-07-27 08:00", "第82、83、84章（3章）", "13585", "待发布")],
+        )
+
+    def test_publish_preview_rows_list_each_chapter_without_body_text(self):
+        chapter = Chapter(
+            Path("第082章-合规负责人.txt"),
+            82,
+            "她拒绝当合规负责人",
+            5715,
+            "hash",
+        )
+        day = ScheduledDay(
+            publish_at=datetime(2026, 7, 27, 8, 0),
+            chapters=(chapter,),
+            status="pending",
+        )
+
+        self.assertEqual(
+            format_publish_preview_rows([day]),
+            [("第82章", "她拒绝当合规负责人", "5715", "2026-07-27 08:00", "待发布")],
         )
 
     def test_format_schedule_detail_rows_keeps_each_chapter_on_its_own_row(self):

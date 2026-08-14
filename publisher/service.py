@@ -71,6 +71,9 @@ class PublishingService:
                 return book
         raise KeyError(f"未知书籍: {book_id}")
 
+    def get_book_state(self, book_id: str) -> BookState:
+        return self._get_state(book_id)
+
     def get_schedule(self, book_id: str) -> list[ScheduledDay]:
         book = self.get_book(book_id)
         state = self._get_state(book_id)

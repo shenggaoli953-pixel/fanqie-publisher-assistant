@@ -48,6 +48,12 @@ class ServiceTests(unittest.TestCase):
     def test_list_books_returns_each_saved_book(self):
         self.assertEqual([book.book_id for book in self.service.list_books()], ["robot"])
 
+    def test_get_book_state_returns_the_selected_book_state(self):
+        state = self.service.get_book_state("robot")
+
+        self.assertEqual(state.book_id, "robot")
+        self.assertEqual(state.last_failed_chapter, None)
+
     def test_short_story_configs_can_be_added_and_updated(self):
         config = ShortStoryConfig(
             story_id="story-1",
