@@ -7,6 +7,7 @@ import sys
 from threading import Thread
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
+import webbrowser
 from collections.abc import Callable
 from uuid import uuid4
 
@@ -23,6 +24,8 @@ from publisher.models import (
     ScheduledDay,
 )
 from publisher.service import PublishingService
+from publisher.updates import UpdateStatus, check_for_update
+from publisher.version import APP_VERSION
 from publisher.short_story import (
     SHORT_STORY_EXTRA_CATEGORIES,
     SHORT_STORY_PRIMARY_CATEGORIES,
@@ -83,7 +86,7 @@ _BODY_FONT = ("Segoe UI Variable Text", 10)
 _BODY_BOLD_FONT = ("Segoe UI Variable Text Semibold", 10)
 _TITLE_FONT = ("Segoe UI Variable Display Semib", 18)
 _CONTEXT_TITLE_FONT = ("Segoe UI Variable Display Semib", 15)
-_APP_VERSION = "0.3.0"
+_APP_VERSION = APP_VERSION
 _UI_THEMES: dict[str, dict[str, str]] = {
     "Codex 浅色": {
         "canvas": "#F7F7F8",
@@ -929,6 +932,14 @@ class PublisherApp:
             style="Secondary.TButton",
         )
         self._help_button.grid(row=1, column=column, padx=(0, 4), pady=(2, 8))
+        column += 1
+        self._update_button = ttk.Button(
+            self._header,
+            text="更新",
+            command=self._check_for_updates,
+            style="Secondary.TButton",
+        )
+        self._update_button.grid(row=0, column=column, rowspan=2, padx=(0, 4))
         column += 1
         self._theme_box = ttk.Combobox(
             self._header,
@@ -1820,6 +1831,33 @@ class PublisherApp:
     def _open_help(self) -> None:
         self._show_help_dialog("使用帮助")
 
+    def _check_for_updates(self) -> None:
+        self._start_task(
+            "正在检查更新",
+            lambda: check_for_update(_APP_VERSION),
+            self._show_update_result,
+        )
+
+    def _show_update_result(self, report) -> None:
+        if report.status is UpdateStatus.AVAILABLE:
+            should_open = messagebox.askyesno(
+                "发现新版本",
+                (
+                    f"当前版本：v{report.current_version}\n"
+                    f"最新版本：v{report.latest_version}\n\n"
+                    "是否打开 GitHub 下载页？"
+                ),
+                parent=self._root,
+            )
+            if should_open:
+                webbrowser.open(report.release_url)
+            return
+        messagebox.showinfo(
+            "已经是最新版本",
+            f"当前版本 v{report.current_version} 已是最新稳定版。",
+            parent=self._root,
+        )
+
     def _show_first_run_guide(self) -> None:
         if self._context is None or self._context.active_profile().guide_seen:
             return
@@ -1927,6 +1965,7 @@ class PublisherApp:
             "_sync_button",
             "_publish_button",
             "_story_publish_button",
+            "_update_button",
         ):
             button = getattr(self, name, None)
             if button is not None:

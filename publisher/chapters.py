@@ -6,7 +6,16 @@ import re
 from publisher.models import Chapter
 
 
-_CHAPTER_NAME = re.compile(r"^第\s*(\d+)\s*章(?:[-_—\s]+)?(.*?)$")
+_CHAPTER_NAME_PATTERNS = (
+    re.compile(r"^第\s*(\d+)\s*(?:章|回|节|话)(?:[-_—\s]+)?(.*?)$"),
+    re.compile(
+        r"^(?:chapter|chap|ch)[-_—\s]*(\d+)(?:[-_—\s]+)?(.*?)$",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(r"^(\d+)(?:[-_—\s]+)(.*?)$"),
+)
+_SUPPORTED_CHAPTER_SUFFIXES = {".txt", ".md"}
+_MARKDOWN_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+(.*)$")
 
 
 class ChapterParseError(ValueError):
@@ -40,7 +49,7 @@ def discover_project(selected_dir: Path) -> DetectedProject:
             errors.append(f"{candidate}: {error}")
 
     if not detected:
-        details = "\n".join(errors) if errors else "目录中没有可识别的 .txt 章节"
+        details = "\n".join(errors) if errors else "目录中没有可识别的 .txt 或 .md 章节"
         raise ChapterParseError(f"未能识别正文目录:\n{details}")
 
     source_dir, chapters = max(
@@ -64,12 +73,20 @@ def scan_chapters(source_dir: Path) -> list[Chapter]:
     errors: list[str] = []
     seen_numbers: dict[int, Path] = {}
 
-    for path in sorted(source_dir.rglob("*.txt")):
-        match = _CHAPTER_NAME.match(path.stem)
-        if match is None:
+    paths = sorted(
+        (
+            path
+            for path in source_dir.rglob("*")
+            if path.is_file() and path.suffix.lower() in _SUPPORTED_CHAPTER_SUFFIXES
+        ),
+        key=lambda path: str(path.relative_to(source_dir)).lower(),
+    )
+    for path in paths:
+        parsed_name = _parse_chapter_name(path.stem)
+        if parsed_name is None:
             continue
 
-        number = int(match.group(1))
+        number, title = parsed_name
         if number in seen_numbers:
             errors.append(
                 f"重复章节号 {number}: {seen_numbers[number].relative_to(source_dir)} 和 "
@@ -84,7 +101,7 @@ def scan_chapters(source_dir: Path) -> list[Chapter]:
             Chapter(
                 relative_path=relative_path,
                 number=number,
-                title=match.group(2).strip(),
+                title=title,
                 character_count=len(re.sub(r"\s+", "", body)),
                 sha256=hashlib.sha256(body.encode("utf-8")).hexdigest(),
             )
@@ -93,7 +110,7 @@ def scan_chapters(source_dir: Path) -> list[Chapter]:
     if errors:
         raise ChapterParseError("\n".join(errors))
     if not chapters:
-        raise ChapterParseError("未找到可发布的 .txt 章节")
+        raise ChapterParseError("未找到可发布的 .txt 或 .md 章节")
     return sorted(chapters, key=lambda chapter: chapter.number)
 
 
@@ -119,7 +136,23 @@ def read_chapter_body(source_dir: Path, chapter: Chapter) -> str:
 def _read_text(path: Path) -> str:
     for encoding in ("utf-8", "utf-8-sig", "gb18030"):
         try:
-            return path.read_text(encoding=encoding)
+            text = path.read_text(encoding=encoding)
+            return _cleanup_markdown_headings(text) if path.suffix.lower() == ".md" else text
         except UnicodeDecodeError:
             continue
     raise ChapterParseError(f"无法读取章节编码: {path}")
+
+
+def _parse_chapter_name(stem: str) -> tuple[int, str] | None:
+    for pattern in _CHAPTER_NAME_PATTERNS:
+        match = pattern.match(stem)
+        if match is not None:
+            return int(match.group(1)), match.group(2).strip()
+    return None
+
+
+def _cleanup_markdown_headings(text: str) -> str:
+    return "\n".join(
+        match.group(1) if (match := _MARKDOWN_HEADING.match(line)) else line
+        for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    )

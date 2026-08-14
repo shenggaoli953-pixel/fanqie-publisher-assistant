@@ -39,7 +39,7 @@ Each profile maintains a bounded local activity log with timestamp, operation, c
 
 ## Onboarding and Support
 
-The first opening of a new profile shows a dismissible, non-blocking guide: choose account, login in Edge, add/select a work, preview, then run. A persistent help button can reopen the guide and shows the installed version. Release notes and support instructions are local text; no background network request is introduced.
+The first opening of a new profile shows a dismissible, non-blocking guide: choose account, login in Edge, add/select a work, preview, then run. A persistent help button can reopen the guide and shows the installed version. Release notes and support instructions are local text. An explicit update button may read the public GitHub release metadata; it does not run automatically or send local content.
 
 ## Safety and Compatibility
 

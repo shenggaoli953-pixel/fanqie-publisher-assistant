@@ -100,9 +100,10 @@ class _Gateway:
         self.remote_reads = 0
         self.known_remote_numbers: list[set[int] | None] = []
         self.on_submit = on_submit
+        self.launches = 0
 
     def launch(self) -> None:
-        pass
+        self.launches += 1
 
     def preflight(self, _book_name: str) -> PreflightResult:
         return PreflightResult(PreflightStatus.READY, "后台已连接")
@@ -291,6 +292,20 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(report.submitted_numbers, (1,))
         self.assertEqual(report.remaining_numbers, (2, 3))
         self.assertEqual(gateway.submitted, [1])
+
+    def test_local_body_preflight_stops_before_opening_edge(self):
+        service = _Service([_day(1)])
+        gateway = _Gateway()
+
+        with self.assertRaisesRegex(ValueError, "正文不能为空"):
+            publish_all_scheduled(
+                service,
+                gateway,
+                service.book.book_id,
+                read_body=lambda _path, _chapter: "\n\n",
+            )
+
+        self.assertEqual(gateway.launches, 0)
 
     def test_sync_accepts_an_empty_remote_manager_as_a_valid_new_book(self):
         service = _Service([])

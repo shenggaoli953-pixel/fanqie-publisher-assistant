@@ -18,6 +18,7 @@ from publisher.models import (
     RemoteChapter,
     ScheduledDay,
 )
+from publisher.updates import UpdateReport, UpdateStatus
 from publisher.workflows import NovelOperationReport, ShortStoryQueueReport
 from publisher.ui import (
     PublisherApp,
@@ -179,6 +180,7 @@ class UiFormattingTests(unittest.TestCase):
         self.assertEqual(app._preview_button.cget("text"), "查看发布清单")
         self.assertEqual(app._recovery_button.cget("text"), "从失败处继续")
         self.assertEqual(app._diagnostic_button.cget("text"), "导出诊断")
+        self.assertEqual(app._update_button.cget("text"), "更新")
         self.assertEqual(app._story_publish_button.cget("style"), "Primary.TButton")
         self.assertEqual(str(app._novel_operation_box.cget("state")), "readonly")
         self.assertEqual(
@@ -821,11 +823,37 @@ class UiFormattingTests(unittest.TestCase):
 
         export.assert_called_once_with(
             destination,
-                version="0.3.0",
+                version="0.4.0",
             state={"book_id": "book-1"},
             schedule=[("schedule", "book-1")],
         )
         show_info.assert_called_once()
+
+    def test_update_check_reports_that_the_current_release_is_installed(self):
+        class Service:
+            def list_books(self):
+                return []
+
+        root = tk.Tk()
+        root.withdraw()
+        self.addCleanup(root.destroy)
+        app = PublisherApp(root, Service(), object())
+        app._start_task = lambda _label, action, done: done(action())
+        report = UpdateReport(
+            UpdateStatus.CURRENT,
+            "0.4.0",
+            "0.4.0",
+            "https://github.com/example/releases",
+        )
+
+        with (
+            patch("publisher.ui.check_for_update", return_value=report),
+            patch("publisher.ui.messagebox.showinfo") as show_info,
+        ):
+            app._check_for_updates()
+
+        show_info.assert_called_once()
+        self.assertIn("0.4.0", show_info.call_args.args[1])
 
     def test_stop_task_requests_a_safe_stop_without_closing_gateway(self):
         class Service:

@@ -1257,6 +1257,18 @@ class BrowserTests(unittest.TestCase):
 
         self.assertEqual(fields.body, "第一段。\n第二段。\n第三段。")
 
+    def test_draft_fields_remove_a_matching_chapter_section_heading(self):
+        chapter = PublishDraft(
+            chapter_number=12,
+            title="风起",
+            body="第12节 风起\n\n正文。",
+            publish_at=datetime(2026, 8, 3, 0, 0),
+        )
+
+        fields = draft_fields(chapter)
+
+        self.assertEqual(fields.body, "正文。")
+
     def test_draft_fields_reject_a_missing_title(self):
         missing_title = PublishDraft(
             chapter_number=1,

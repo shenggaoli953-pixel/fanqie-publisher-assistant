@@ -10,6 +10,7 @@ from publisher.browser import (
     PublishBlockedError,
     PublishDraft,
     ScheduleChange,
+    draft_fields,
 )
 from publisher.models import Chapter, NovelOperation, RemoteChapter
 from publisher.short_story_browser import (
@@ -102,6 +103,17 @@ def publish_all_scheduled(
     book = service.get_book(book_id)
     if record_activity is not None:
         record_activity("scheduled", "started")
+    progress("正在检查本地正文")
+    try:
+        _validate_local_drafts(
+            book,
+            service.selected_source_chapters(book.book_id),
+            read_body,
+        )
+    except Exception as error:
+        if record_activity is not None:
+            record_activity("scheduled", "failed", error=str(error))
+        raise
     progress("正在连接番茄后台")
     gateway.launch()
     preflight = gateway.preflight(book.name)
@@ -287,8 +299,10 @@ def run_novel_operation(
     source_chapters = service.selected_source_chapters(book.book_id)
     if record_activity is not None:
         record_activity(operation.value, "started")
-    progress("正在连接番茄后台")
+    progress("正在检查本地正文")
     try:
+        _validate_local_drafts(book, source_chapters, read_body)
+        progress("正在连接番茄后台")
         gateway.launch()
         preflight = gateway.preflight(book.name)
         if preflight.status is not PreflightStatus.READY:
@@ -445,6 +459,17 @@ def _draft_for(book, chapter: Chapter, read_body: Callable[[Path, Chapter], str]
         publish_at=datetime.now(),
         ai_generated=book.ai_generated,
     )
+
+
+def _validate_local_drafts(
+    book,
+    chapters: list[Chapter],
+    read_body: Callable[[Path, Chapter], str],
+) -> None:
+    if not chapters:
+        raise ValueError("当前范围内没有可发布的本地章节")
+    for chapter in chapters:
+        draft_fields(_draft_for(book, chapter, read_body))
 
 
 def _operation_report(

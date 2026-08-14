@@ -11,7 +11,9 @@ from typing import Protocol
 from publisher.models import RemoteChapter
 
 
-_CHAPTER_HEADING = re.compile(r"^第\s*([0-9]+|[零一二三四五六七八九十百千两]+)\s*章\s*(.*)$")
+_CHAPTER_HEADING = re.compile(
+    r"^第\s*([0-9]+|[零一二三四五六七八九十百千两]+)\s*(?:章|回|节|话)\s*(.*)$"
+)
 _REMOTE_CHAPTER_NUMBER = re.compile(r"第\s*(\d+)\s*章")
 _REMOTE_PUBLISH_AT = re.compile(r"\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}")
 _CHINESE_DIGITS = {

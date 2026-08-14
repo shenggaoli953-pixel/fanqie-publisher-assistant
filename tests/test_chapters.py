@@ -6,6 +6,7 @@ from publisher.chapters import (
     ChapterParseError,
     contiguous_chapters,
     discover_project,
+    read_chapter_body,
     scan_chapters,
 )
 
@@ -65,3 +66,29 @@ class ChapterScanTests(unittest.TestCase):
             chapters = contiguous_chapters(scan_chapters(root), 1, None)
 
         self.assertEqual([chapter.number for chapter in chapters], [1])
+
+    def test_scan_supports_markdown_and_common_chapter_name_forms(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "第001回-开场.md").write_text(
+                "# 第1回 开场\n\n正文一", encoding="utf-8"
+            )
+            (root / "chapter-2-继续.md").write_text("正文二", encoding="utf-8")
+            (root / "3-收束.txt").write_text("正文三", encoding="utf-8")
+
+            chapters = scan_chapters(root)
+            first_body = read_chapter_body(root, chapters[0])
+
+        self.assertEqual([chapter.number for chapter in chapters], [1, 2, 3])
+        self.assertEqual([chapter.title for chapter in chapters], ["开场", "继续", "收束"])
+        self.assertEqual(first_body, "第1回 开场\n\n正文一")
+        self.assertEqual(chapters[0].character_count, len("第1回开场正文一"))
+
+    def test_scan_rejects_duplicate_numbers_across_text_and_markdown(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "第001章-正文.txt").write_text("正文", encoding="utf-8")
+            (root / "chapter-1-副本.md").write_text("正文", encoding="utf-8")
+
+            with self.assertRaises(ChapterParseError):
+                scan_chapters(root)
