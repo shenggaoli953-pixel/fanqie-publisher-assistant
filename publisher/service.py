@@ -204,6 +204,13 @@ class PublishingService:
         self._repository.save_state(replace(state, confirmation=confirmation, last_error=None))
         return confirmation.token
 
+    def cancel_batch(self, book_id: str, token: str) -> None:
+        state = self._get_state(book_id)
+        confirmation = state.confirmation
+        if confirmation is None or confirmation.token != token:
+            raise PermissionError("批次尚未确认")
+        self._repository.save_state(replace(state, confirmation=None))
+
     def record_submission(
         self,
         book_id: str,

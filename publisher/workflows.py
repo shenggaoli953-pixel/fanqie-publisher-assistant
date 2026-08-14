@@ -2,6 +2,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from publisher.activity import ActivityLog, RunControl
 from publisher.browser import (
     PreflightStatus,
     PublishBlockedError,
@@ -26,10 +27,12 @@ class PublishRunReport:
     submitted_numbers: tuple[int, ...]
     failed_chapter: int | None = None
     error: str | None = None
+    cancelled: bool = False
+    remaining_numbers: tuple[int, ...] = ()
 
     @property
     def success(self) -> bool:
-        return self.failed_chapter is None and self.error is None
+        return not self.cancelled and self.failed_chapter is None and self.error is None
 
 
 @dataclass(frozen=True)
@@ -73,9 +76,14 @@ def publish_all_scheduled(
     *,
     read_body: Callable[[Path, Chapter], str],
     on_progress: Callable[[str], None] | None = None,
+    control: RunControl | None = None,
+    activity_log: ActivityLog | None = None,
 ) -> PublishRunReport:
     progress = on_progress or (lambda _message: None)
+    record_activity = activity_log.append if activity_log is not None else None
     book = service.get_book(book_id)
+    if record_activity is not None:
+        record_activity("scheduled", "started")
     progress("正在连接番茄后台")
     gateway.launch()
     preflight = gateway.preflight(book.name)
@@ -95,6 +103,16 @@ def publish_all_scheduled(
     submitted: list[int] = []
 
     while True:
+        if control is not None and control.stop_requested():
+            remaining = _remaining_numbers(service, book.book_id, submitted)
+            progress("任务已停止，未开始下一章")
+            if record_activity is not None:
+                record_activity("scheduled", "stopped")
+            return PublishRunReport(
+                tuple(submitted),
+                cancelled=True,
+                remaining_numbers=remaining,
+            )
         try:
             day = service.next_pending_day(book.book_id, remote_chapters)
         except ValueError as error:
@@ -130,8 +148,11 @@ def publish_all_scheduled(
             drafts,
             book.name,
             known_remote_numbers=known_remote_numbers,
+            should_stop=(control.stop_requested if control is not None else None),
         )
         for result in results:
+            if result.cancelled:
+                continue
             service.record_submission(
                 book.book_id,
                 result.chapter_number,
@@ -141,9 +162,44 @@ def publish_all_scheduled(
             )
             if result.success:
                 submitted.append(result.chapter_number)
+                if record_activity is not None:
+                    record_activity(
+                        "scheduled",
+                        "submitted",
+                        chapter_number=result.chapter_number,
+                    )
+
+        cancelled = next((result for result in results if result.cancelled), None)
+        if cancelled is not None:
+            service.cancel_batch(book.book_id, token)
+            remaining = _remaining_numbers(
+                service,
+                book.book_id,
+                submitted,
+                first_number=cancelled.chapter_number,
+            )
+            progress("任务已停止，未开始下一章")
+            if record_activity is not None:
+                record_activity(
+                    "scheduled",
+                    "stopped",
+                    chapter_number=cancelled.chapter_number,
+                )
+            return PublishRunReport(
+                tuple(submitted),
+                cancelled=True,
+                remaining_numbers=remaining,
+            )
 
         failed = next((result for result in results if not result.success), None)
         if failed is not None:
+            if record_activity is not None:
+                record_activity(
+                    "scheduled",
+                    "failed",
+                    chapter_number=failed.chapter_number,
+                    error=failed.error,
+                )
             return PublishRunReport(
                 tuple(submitted),
                 failed_chapter=failed.chapter_number,
@@ -172,7 +228,29 @@ def publish_all_scheduled(
         known_remote_numbers.update(submitted_numbers)
 
     progress("全部排程处理完成")
+    if record_activity is not None:
+        record_activity("scheduled", "completed")
     return PublishRunReport(tuple(submitted))
+
+
+def _remaining_numbers(
+    service,
+    book_id: str,
+    submitted: list[int],
+    *,
+    first_number: int | None = None,
+) -> tuple[int, ...]:
+    numbers: list[int] = []
+    if first_number is not None:
+        numbers.append(first_number)
+    submitted_numbers = set(submitted)
+    for day in service.get_schedule(book_id):
+        if day.status == "submitted":
+            continue
+        for chapter in day.chapters:
+            if chapter.number not in submitted_numbers:
+                numbers.append(chapter.number)
+    return tuple(dict.fromkeys(numbers))
 
 
 def publish_short_story(

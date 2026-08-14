@@ -218,6 +218,13 @@ class ServiceTests(unittest.TestCase):
 
         self.assertEqual(self.service.failure_status("robot"), (None, None))
 
+    def test_cancel_batch_clears_the_unconsumed_confirmation(self):
+        token = self.service.confirm_batch("robot", [1, 2])
+
+        self.service.cancel_batch("robot", token)
+
+        self.assertIsNone(self.service.get_book_state("robot").confirmation)
+
     def test_remote_fit_keeps_the_pending_schedule_slot_time(self):
         chapters = scan_chapters(self.source_dir)
         book = BookConfig(

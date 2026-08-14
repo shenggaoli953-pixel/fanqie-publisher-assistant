@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import subprocess
 import time
+from collections.abc import Callable
 from typing import Protocol
 
 from publisher.models import RemoteChapter
@@ -227,6 +228,7 @@ class SubmissionResult:
     blocked: bool = False
     error: str | None = None
     verified: bool = False
+    cancelled: bool = False
 
 
 @dataclass(frozen=True)
@@ -263,6 +265,7 @@ class PublisherGateway(Protocol):
         book_name: str | None = None,
         *,
         known_remote_numbers: set[int] | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> list[SubmissionResult]: ...
 
 
@@ -277,9 +280,19 @@ class FakePublisherGateway:
         book_name: str | None = None,
         *,
         known_remote_numbers: set[int] | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> list[SubmissionResult]:
         results: list[SubmissionResult] = []
         for position, draft in enumerate(drafts, start=1):
+            if should_stop is not None and should_stop():
+                results.append(
+                    SubmissionResult(
+                        chapter_number=draft.chapter_number,
+                        success=False,
+                        cancelled=True,
+                    )
+                )
+                break
             if self._block_at == position:
                 results.append(
                     SubmissionResult(
@@ -388,6 +401,7 @@ class EdgePublisherGateway:
         book_name: str | None = None,
         *,
         known_remote_numbers: set[int] | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> list[SubmissionResult]:
         if self._page is None:
             raise PublishBlockedError("请先打开并登录 Edge")
@@ -401,6 +415,15 @@ class EdgePublisherGateway:
         )
         results: list[SubmissionResult] = []
         for draft in drafts:
+            if should_stop is not None and should_stop():
+                results.append(
+                    SubmissionResult(
+                        chapter_number=draft.chapter_number,
+                        success=False,
+                        cancelled=True,
+                    )
+                )
+                break
             success = False
             for attempt in range(2):
                 try:

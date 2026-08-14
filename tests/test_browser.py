@@ -889,6 +889,35 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(verify_current_page.call_count, 2)
         all_remote_numbers.assert_not_called()
 
+    def test_submit_batch_stops_before_a_later_draft_when_requested(self):
+        gateway = EdgePublisherGateway.__new__(EdgePublisherGateway)
+        gateway._page = object()
+        submitted: list[int] = []
+
+        with (
+            patch.object(gateway, "_open_chapter_manager"),
+            patch.object(
+                gateway,
+                "_submit_one",
+                side_effect=lambda item: submitted.append(item.chapter_number),
+            ),
+            patch.object(
+                gateway,
+                "_return_to_manager_after_submission",
+                return_value=True,
+            ),
+        ):
+            results = gateway.submit_batch(
+                [draft(1), draft(2)],
+                "测试作品",
+                known_remote_numbers=set(),
+                should_stop=lambda: len(submitted) == 1,
+            )
+
+        self.assertEqual(submitted, [1])
+        self.assertTrue(results[-1].cancelled)
+        self.assertEqual(results[-1].chapter_number, 2)
+
     def test_draft_form_uses_keyboard_body_input_and_retries_after_a_reset(self):
         gateway = EdgePublisherGateway.__new__(EdgePublisherGateway)
         page = _ResettingDraftPage(resets=1)

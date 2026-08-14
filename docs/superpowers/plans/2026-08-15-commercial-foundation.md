@@ -137,14 +137,17 @@ git commit -m "feat: scope services to active publishing account"
 - Create: `publisher/activity.py`
 - Create: `tests/test_activity.py`
 - Modify: `publisher/browser.py`
+- Modify: `publisher/service.py`
 - Modify: `publisher/workflows.py`
 - Modify: `tests/test_browser.py`
+- Modify: `tests/test_service.py`
 - Modify: `tests/test_workflows.py`
 
 **Interfaces:**
 - Produces `RunControl.request_stop()` and `RunControl.stop_requested()`.
 - Produces `ActivityLog(workspace_dir: Path)` with `append(operation, state, chapter_number=None, error=None)` and `recent()`.
 - Extends gateway `submit_batch(..., should_stop: Callable[[], bool] | None = None)`.
+- Produces `PublishingService.cancel_batch(book_id, token)` to clear an unconsumed batch confirmation.
 - Extends `PublishRunReport` with `cancelled: bool` and `remaining_numbers: tuple[int, ...]`.
 
 - [ ] **Step 1: Write failing cancellation and privacy tests**
@@ -164,6 +167,11 @@ def test_activity_log_omits_private_error_text(self):
     payload = (self.root / "activity.json").read_text(encoding="utf-8")
     for value in ("C:/private", "https://", "正文", "标题"):
         self.assertNotIn(value, payload)
+
+def test_cancel_batch_clears_the_unconsumed_confirmation(self):
+    token = self.service.confirm_batch("robot", [1, 2])
+    self.service.cancel_batch("robot", token)
+    self.assertIsNone(self.service.get_book_state("robot").confirmation)
 ```
 
 - [ ] **Step 2: Run the new tests**
@@ -182,14 +190,14 @@ for draft in drafts:
     self._submit_one(draft)
 ```
 
-Workflows convert the cancellation sentinel into a stopped report, write `scheduled`, `submitted`, `failed`, or `stopped` records, and preserve remaining chapter numbers. The log retains at most 500 JSON records and writes atomically.
+Workflows record successful chapters, call `cancel_batch` for the remaining confirmation, convert the cancellation sentinel into a stopped report, and write `scheduled`, `submitted`, `failed`, or `stopped` records. The log retains at most 500 JSON records and writes atomically.
 
 - [ ] **Step 4: Run focused tests and commit**
 
-Run: `python -m unittest tests.test_activity tests.test_browser tests.test_workflows -v`
+Run: `python -m unittest tests.test_activity tests.test_browser tests.test_service tests.test_workflows -v`
 
 ```bash
-git add publisher/activity.py publisher/browser.py publisher/workflows.py tests/test_activity.py tests/test_browser.py tests/test_workflows.py
+git add publisher/activity.py publisher/browser.py publisher/service.py publisher/workflows.py tests/test_activity.py tests/test_browser.py tests/test_service.py tests/test_workflows.py
 git commit -m "feat: add cooperative task stop and activity history"
 ```
 

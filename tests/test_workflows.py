@@ -2,6 +2,7 @@ from datetime import date, datetime, time
 from pathlib import Path
 import unittest
 
+from publisher.activity import RunControl
 from publisher.browser import PreflightResult, PreflightStatus, SubmissionResult
 from publisher.models import BookConfig, Chapter, PublishMode, RemoteChapter, ScheduledDay
 from publisher.short_story import ShortStoryConfig
@@ -67,14 +68,21 @@ class _Service:
     ) -> None:
         self.recorded.append((chapter_number, success, error))
 
+    def cancel_batch(self, _book_id: str, _token: str) -> None:
+        pass
+
+    def get_schedule(self, _book_id: str):
+        return list(self.days)
+
 
 class _Gateway:
-    def __init__(self, remote=(), fail_at: int | None = None) -> None:
+    def __init__(self, remote=(), fail_at: int | None = None, on_submit=None) -> None:
         self.remote = list(remote)
         self.fail_at = fail_at
         self.submitted: list[int] = []
         self.remote_reads = 0
         self.known_remote_numbers: list[set[int] | None] = []
+        self.on_submit = on_submit
 
     def launch(self) -> None:
         pass
@@ -86,13 +94,25 @@ class _Gateway:
         self.remote_reads += 1
         return list(self.remote)
 
-    def submit_batch(self, drafts, _book_name: str, *, known_remote_numbers=None):
+    def submit_batch(
+        self,
+        drafts,
+        _book_name: str,
+        *,
+        known_remote_numbers=None,
+        should_stop=None,
+    ):
         self.known_remote_numbers.append(
             None if known_remote_numbers is None else set(known_remote_numbers)
         )
         results = []
         for draft in drafts:
+            if should_stop is not None and should_stop():
+                results.append(SubmissionResult(draft.chapter_number, False, cancelled=True))
+                break
             self.submitted.append(draft.chapter_number)
+            if self.on_submit is not None:
+                self.on_submit(draft.chapter_number)
             if draft.chapter_number == self.fail_at:
                 results.append(
                     SubmissionResult(
@@ -172,6 +192,26 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(report.submitted_numbers, (1,))
         self.assertEqual(report.failed_chapter, 2)
         self.assertEqual(report.error, "真实失败")
+
+    def test_publish_stops_before_the_next_chapter_when_requested(self):
+        control = RunControl()
+        service = _Service([_day(1), _day(2), _day(3)])
+        gateway = _Gateway(
+            on_submit=lambda number: control.request_stop() if number == 1 else None
+        )
+
+        report = publish_all_scheduled(
+            service,
+            gateway,
+            service.book.book_id,
+            read_body=lambda _path, _chapter: "正文",
+            control=control,
+        )
+
+        self.assertTrue(report.cancelled)
+        self.assertEqual(report.submitted_numbers, (1,))
+        self.assertEqual(report.remaining_numbers, (2, 3))
+        self.assertEqual(gateway.submitted, [1])
 
     def test_sync_accepts_an_empty_remote_manager_as_a_valid_new_book(self):
         service = _Service([])
