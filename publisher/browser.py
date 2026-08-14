@@ -242,6 +242,50 @@ class PreflightResult:
 
 
 @dataclass(frozen=True)
+class ManagedChapter:
+    chapter_number: int
+    status: str
+    editor_path: str
+
+
+def managed_chapters_from_rows(
+    rows: list[tuple[str, str | None]],
+) -> list[ManagedChapter]:
+    managed: list[ManagedChapter] = []
+    numbers: set[int] = set()
+    for row_text, editor_path in rows:
+        match = _REMOTE_CHAPTER_NUMBER.search(row_text)
+        if match is None:
+            continue
+        chapter_number = int(match.group(1))
+        if chapter_number in numbers:
+            raise PublishBlockedError(f"后台章节序号重复：第{chapter_number}章")
+        if editor_path is None or "/publish/" not in editor_path:
+            raise PublishBlockedError(f"第{chapter_number}章没有可用编辑入口")
+        numbers.add(chapter_number)
+        managed.append(
+            ManagedChapter(
+                chapter_number=chapter_number,
+                status=_managed_chapter_status(row_text),
+                editor_path=editor_path,
+            )
+        )
+    return managed
+
+
+def _managed_chapter_status(row_text: str) -> str:
+    if "待发布" in row_text:
+        return "pending"
+    if "审核中" in row_text:
+        return "reviewing"
+    if "已发布" in row_text:
+        return "published"
+    if "草稿" in row_text:
+        return "draft"
+    return "unknown"
+
+
+@dataclass(frozen=True)
 class EdgeSelectors:
     title_input: str | None = None
     body_editor: str | None = None
@@ -640,6 +684,10 @@ class EdgePublisherGateway:
     def existing_remote_chapters(self) -> list[RemoteChapter]:
         return remote_chapters(self._all_remote_rows())
 
+    def managed_chapters(self, book_name: str) -> list[ManagedChapter]:
+        self._open_chapter_manager(book_name)
+        return managed_chapters_from_rows(self._all_managed_rows())
+
     def _new_chapter_page(self):
         if self._page is None:
             raise PublishBlockedError("未打开章节管理页")
@@ -946,6 +994,51 @@ class EdgePublisherGateway:
 
         return all_rows
 
+    def _managed_rows(self) -> list[tuple[str, str | None]]:
+        row_texts = self._remote_rows()
+        rows = self._page.locator("tr")
+        managed_rows: list[tuple[str, str | None]] = []
+        for index, row_text in enumerate(row_texts):
+            row = rows.nth(index)
+            paths = row.locator("a").evaluate_all(
+                "items => items.map(item => item.getAttribute('href') || '')"
+                ".filter(value => value.includes('/publish/'))"
+            )
+            managed_rows.append((row_text, paths[0] if paths else None))
+        return managed_rows
+
+    def _all_managed_rows(self) -> list[tuple[str, str | None]]:
+        if self._page is None:
+            raise PublishBlockedError("无法检查后台已有章节")
+        all_rows = self._managed_rows()
+        pagination = self._page.locator(".arco-pagination").last
+        if pagination.count() == 0:
+            return all_rows
+        first_page = pagination.get_by_text("1", exact=True).last
+        if first_page.count() and "arco-pagination-item-active" not in (
+            first_page.get_attribute("class") or ""
+        ):
+            previous_rows = tuple(all_rows)
+            previous_page = self._active_page_number()
+            first_page.click()
+            all_rows = self._wait_for_managed_page_change(
+                previous_page,
+                previous_rows,
+            )
+        next_page = pagination.locator(".arco-pagination-item-next").last
+        if next_page.count() == 0:
+            raise PublishBlockedError("章节列表分页无法读取，已停止提交")
+        while "arco-pagination-item-disabled" not in (
+            next_page.get_attribute("class") or ""
+        ):
+            previous_rows = tuple(self._managed_rows())
+            previous_page = self._active_page_number()
+            next_page.click()
+            all_rows.extend(
+                self._wait_for_managed_page_change(previous_page, previous_rows)
+            )
+        return all_rows
+
     def _active_page_number(self) -> int | None:
         try:
             active = self._page.locator(".arco-pagination-item-active").last
@@ -965,6 +1058,36 @@ class EdgePublisherGateway:
         while time.monotonic() < deadline:
             self._page.wait_for_timeout(120)
             rows = tuple(self._remote_rows())
+            active_page = self._active_page_number()
+            page_changed = (
+                previous_page is None
+                or active_page is None
+                or active_page != previous_page
+            )
+            if page_changed and rows != previous_rows:
+                if rows == candidate:
+                    stable_reads += 1
+                else:
+                    candidate = rows
+                    stable_reads = 1
+                if stable_reads >= 2:
+                    return list(rows)
+            else:
+                candidate = None
+                stable_reads = 0
+        raise PublishBlockedError("章节列表翻页未完成，已停止读取")
+
+    def _wait_for_managed_page_change(
+        self,
+        previous_page: int | None,
+        previous_rows: tuple[tuple[str, str | None], ...],
+    ) -> list[tuple[str, str | None]]:
+        deadline = time.monotonic() + 6
+        candidate: tuple[tuple[str, str | None], ...] | None = None
+        stable_reads = 0
+        while time.monotonic() < deadline:
+            self._page.wait_for_timeout(120)
+            rows = tuple(self._managed_rows())
             active_page = self._active_page_number()
             page_changed = (
                 previous_page is None

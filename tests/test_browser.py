@@ -15,6 +15,7 @@ from publisher.browser import (
     draft_fields,
     edge_launch_arguments,
     interpret_publish_response,
+    managed_chapters_from_rows,
     remote_chapter_numbers,
     remote_chapters,
     remote_row_has_chapter,
@@ -1097,6 +1098,25 @@ class BrowserTests(unittest.TestCase):
         row = "第1章 第1章\n\t\n2000\n\t\n待发布\n\t\n2026-08-02 00:00"
 
         self.assertTrue(remote_row_has_chapter(row, draft(1)))
+
+    def test_managed_chapters_keep_only_number_status_and_editor_path(self):
+        managed = managed_chapters_from_rows(
+            [
+                (
+                    "第8章 标题\n2000\n待发布\n2026-08-20 08:00",
+                    "/main/writer/book/publish/item-8",
+                ),
+                (
+                    "第9章 标题\n2000\n审核中",
+                    "/main/writer/book/publish/item-9",
+                ),
+            ]
+        )
+
+        self.assertEqual(managed[0].chapter_number, 8)
+        self.assertEqual(managed[0].status, "pending")
+        self.assertEqual(managed[0].editor_path, "/main/writer/book/publish/item-8")
+        self.assertEqual(managed[1].status, "reviewing")
 
     def test_schedule_values_keep_the_planned_date_and_time(self):
         self.assertEqual(
