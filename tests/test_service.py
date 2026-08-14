@@ -169,6 +169,39 @@ class ServiceTests(unittest.TestCase):
 
         self.assertEqual(restored.get_book("robot").next_chapter, 2)
 
+    def test_failure_status_clears_only_after_the_failed_chapter_succeeds(self):
+        token = self.service.confirm_batch("robot", [1])
+        self.service.record_submission("robot", 1, False, token, "network error")
+
+        self.assertEqual(self.service.failure_status("robot"), (1, "network error"))
+
+        retry_token = self.service.confirm_batch("robot", [1])
+        self.service.record_submission("robot", 1, True, retry_token)
+
+        self.assertEqual(self.service.failure_status("robot"), (None, None))
+
+    def test_remote_fit_keeps_the_pending_schedule_slot_time(self):
+        chapters = scan_chapters(self.source_dir)
+        book = BookConfig(
+            book_id="robot",
+            name="机器人",
+            source_dir=self.source_dir,
+            publish_time=time(8, 0),
+            publish_times=(time(8, 0), time(12, 0)),
+            mode=PublishMode.CHAPTERS,
+            limit=2,
+            next_chapter=1,
+            publish_start_date=date(2026, 7, 27),
+        )
+        day = ScheduledDay(
+            publish_at=datetime(2026, 7, 27, 12, 0),
+            chapters=(chapters[0],),
+        )
+
+        fitted = PublishingService._fit_remote_daily_limit(book, day, [])
+
+        self.assertEqual(fitted.publish_at, datetime(2026, 7, 27, 12, 0))
+
     def test_next_pending_day_retries_only_unsubmitted_chapters_of_partial_day(self):
         self.service.update_policy(
             "robot",

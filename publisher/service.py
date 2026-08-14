@@ -83,6 +83,10 @@ class PublishingService:
             ]
         return [self._with_status(day, submitted) for day in state.schedule]
 
+    def failure_status(self, book_id: str) -> tuple[int | None, str | None]:
+        state = self._get_state(book_id)
+        return state.last_failed_chapter, state.last_error
+
     def next_pending_day(
         self, book_id: str, remote_chapters: list[RemoteChapter] | None = None
     ) -> ScheduledDay:
@@ -210,13 +214,26 @@ class PublishingService:
 
         if not success:
             self._repository.save_state(
-                replace(state, confirmation=None, last_error=error or "提交失败")
+                replace(
+                    state,
+                    confirmation=None,
+                    last_error=error or "提交失败",
+                    last_failed_chapter=chapter_number,
+                )
             )
             return
 
         submitted = tuple(sorted({*state.submitted_chapters, chapter_number}))
+        cleared_failure = state.last_failed_chapter == chapter_number
         self._repository.save_state(
-            replace(state, submitted_chapters=submitted, last_error=None)
+            replace(
+                state,
+                submitted_chapters=submitted,
+                last_error=None if cleared_failure else state.last_error,
+                last_failed_chapter=(
+                    None if cleared_failure else state.last_failed_chapter
+                ),
+            )
         )
         self._save_next_chapter(book_id, submitted)
 
@@ -238,12 +255,16 @@ class PublishingService:
             )
         }
         submitted = tuple(sorted(source_numbers & remote_numbers))
+        cleared_failure = state.last_failed_chapter in remote_numbers
         self._repository.save_state(
             replace(
                 state,
                 submitted_chapters=submitted,
                 confirmation=None,
-                last_error=None,
+                last_error=None if cleared_failure else state.last_error,
+                last_failed_chapter=(
+                    None if cleared_failure else state.last_failed_chapter
+                ),
             )
         )
         self._save_next_chapter(book_id, submitted)
@@ -342,7 +363,6 @@ class PublishingService:
                 state,
                 schedule=tuple(day for day in refreshed_days if day.chapters),
                 confirmation=None,
-                last_error=None,
             )
             self._repository.save_state(refreshed)
             return refreshed
@@ -462,7 +482,7 @@ class PublishingService:
                 return replace(
                     day,
                     chapters=tuple(selected),
-                    publish_at=datetime.combine(publish_date, book.publish_time),
+                    publish_at=datetime.combine(publish_date, day.publish_at.time()),
                 )
             publish_date += timedelta(days=1)
 
