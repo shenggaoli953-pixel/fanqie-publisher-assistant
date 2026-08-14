@@ -12,7 +12,11 @@ from publisher.models import BookConfig, Chapter, PublishMode, RemoteChapter, Sc
 from publisher.workflows import ShortStoryQueueReport
 from publisher.ui import (
     PublisherApp,
+    _BODY_BOLD_FONT,
+    _BODY_FONT,
     _SHORT_STORY_CATEGORIES,
+    _TITLE_FONT,
+    _UI_THEMES,
     format_publish_confirmation,
     format_schedule_detail_title,
     format_schedule_detail_rows,
@@ -232,18 +236,50 @@ class UiFormattingTests(unittest.TestCase):
             )
 
             self.assertEqual(app._theme_name_var.get(), "Codex 浅色")
-            self.assertIn("石墨夜", app._theme_box.cget("values"))
-            app._theme_name_var.set("石墨夜")
+            self.assertEqual(
+                app._theme_box.cget("values"),
+                (
+                    "Codex 浅色",
+                    "Codex 柔白",
+                    "Codex 深色",
+                    "Codex 黑曜",
+                    "Codex 石墨",
+                    "Codex 暖灰",
+                ),
+            )
+            app._theme_name_var.set("Codex 黑曜")
             app._apply_selected_theme()
 
-            self.assertEqual(app._header.cget("background"), "#1C1C1C")
-            self.assertEqual(app._books_list.cget("background"), "#242424")
+            self.assertEqual(app._header.cget("background"), "#0D0D0D")
+            self.assertEqual(app._books_list.cget("background"), "#161616")
             self.assertEqual(
                 json.loads(settings_path.read_text(encoding="utf-8")),
-                {"version": 2, "theme": "石墨夜"},
+                {"version": 3, "theme": "Codex 黑曜"},
             )
 
-    def test_legacy_theme_preference_moves_to_codex_light(self):
+    def test_workbench_uses_the_codex_style_system_font_stack(self):
+        self.assertEqual(_BODY_FONT, ("Segoe UI Variable Text", 10))
+        self.assertEqual(_BODY_BOLD_FONT, ("Segoe UI Variable Text Semibold", 10))
+        self.assertEqual(_TITLE_FONT, ("Segoe UI Variable Display Semib", 18))
+
+    def test_codex_graphite_primary_button_keeps_white_text_readable(self):
+        def relative_luminance(color: str) -> float:
+            channels = tuple(int(color[index : index + 2], 16) / 255 for index in (1, 3, 5))
+
+            def linearize(channel: float) -> float:
+                return channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
+
+            red, green, blue = (linearize(channel) for channel in channels)
+            return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+
+        palette = _UI_THEMES["Codex 石墨"]
+        white_luminance = relative_luminance("#FFFFFF")
+        for key in ("primary", "primary_active"):
+            foreground_luminance = relative_luminance(palette[key])
+            contrast = (white_luminance + 0.05) / (foreground_luminance + 0.05)
+            self.assertGreaterEqual(contrast, 4.5, key)
+
+    def test_legacy_warm_theme_preference_moves_to_codex_warm_gray(self):
         class Service:
             def list_books(self):
                 return []
@@ -265,10 +301,10 @@ class UiFormattingTests(unittest.TestCase):
                 theme_settings_path=settings_path,
             )
 
-            self.assertEqual(app._theme_name_var.get(), "Codex 浅色")
+            self.assertEqual(app._theme_name_var.get(), "Codex 暖灰")
             self.assertEqual(
                 json.loads(settings_path.read_text(encoding="utf-8")),
-                {"version": 2, "theme": "Codex 浅色"},
+                {"version": 3, "theme": "Codex 暖灰"},
             )
 
     def test_invalid_theme_preference_uses_codex_light(self):
@@ -292,7 +328,7 @@ class UiFormattingTests(unittest.TestCase):
 
         self.assertEqual(app._theme_name_var.get(), "Codex 浅色")
 
-    def test_legacy_theme_write_error_keeps_codex_light(self):
+    def test_legacy_theme_write_error_keeps_codex_warm_gray(self):
         class Service:
             def list_books(self):
                 return []
@@ -315,7 +351,7 @@ class UiFormattingTests(unittest.TestCase):
                     theme_settings_path=settings_path,
                 )
 
-        self.assertEqual(app._theme_name_var.get(), "Codex 浅色")
+        self.assertEqual(app._theme_name_var.get(), "Codex 暖灰")
 
     def test_minimum_window_keeps_schedule_panels_usable(self):
         class Service:
