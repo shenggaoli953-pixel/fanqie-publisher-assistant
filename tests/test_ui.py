@@ -10,8 +10,15 @@ from unittest.mock import patch
 from publisher.browser import PreflightResult, PreflightStatus, SubmissionResult
 from publisher.activity import ActivityEntry, RunControl
 from publisher.application import ApplicationContext
-from publisher.models import BookConfig, Chapter, PublishMode, RemoteChapter, ScheduledDay
-from publisher.workflows import ShortStoryQueueReport
+from publisher.models import (
+    BookConfig,
+    Chapter,
+    NovelOperation,
+    PublishMode,
+    RemoteChapter,
+    ScheduledDay,
+)
+from publisher.workflows import NovelOperationReport, ShortStoryQueueReport
 from publisher.ui import (
     PublisherApp,
     _BODY_BOLD_FONT,
@@ -173,10 +180,64 @@ class UiFormattingTests(unittest.TestCase):
         self.assertEqual(app._recovery_button.cget("text"), "从失败处继续")
         self.assertEqual(app._diagnostic_button.cget("text"), "导出诊断")
         self.assertEqual(app._story_publish_button.cget("style"), "Primary.TButton")
+        self.assertEqual(str(app._novel_operation_box.cget("state")), "readonly")
         self.assertEqual(
             app._schedule.tag_configure("submitted")["foreground"],
             "#5D6B52",
         )
+
+    def test_operation_picker_updates_the_primary_action(self):
+        class Service:
+            def list_books(self):
+                return []
+
+        root = tk.Tk()
+        root.withdraw()
+        self.addCleanup(root.destroy)
+        app = PublisherApp(root, Service(), object())
+        app._novel_operation_var.set("修改排期")
+
+        app._on_novel_operation_changed()
+
+        self.assertEqual(app._selected_novel_operation(), NovelOperation.RESCHEDULE)
+        self.assertEqual(app._publish_button.cget("text"), "修改排期")
+
+    def test_direct_operation_uses_the_unified_workflow(self):
+        book = BookConfig(
+            book_id="book-1",
+            name="测试作品",
+            source_dir=Path("."),
+            publish_time=time(0, 0),
+            mode=PublishMode.WORDS,
+            limit=10000,
+            next_chapter=1,
+        )
+
+        class Service:
+            def list_books(self):
+                return []
+
+        root = tk.Tk()
+        root.withdraw()
+        self.addCleanup(root.destroy)
+        app = PublisherApp(root, Service(), object())
+        app._selected_book_id = book.book_id
+        app._load_book = lambda _book_id: None
+        app._start_task = lambda _label, action, done: done(action())
+
+        with (
+            patch("publisher.ui.run_novel_operation") as run_operation,
+            patch("publisher.ui.messagebox.showinfo") as show_info,
+        ):
+            run_operation.return_value = NovelOperationReport(
+                NovelOperation.DRAFT,
+                (1,),
+            )
+            app._start_novel_operation(NovelOperation.DRAFT)
+
+        self.assertEqual(run_operation.call_args.args[3], NovelOperation.DRAFT)
+        self.assertEqual(app._task_status_var.get(), "存为草稿完成，共处理 1 章")
+        show_info.assert_called_once()
 
     def test_app_uses_a_readable_editorial_workbench_theme(self):
         class Service:

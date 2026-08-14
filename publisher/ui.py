@@ -15,7 +15,13 @@ from publisher.chapters import ChapterParseError, discover_project, read_chapter
 from publisher.diagnostics import write_diagnostic_report
 from publisher.activity import ActivityLog, RunControl
 from publisher.application import ApplicationContext
-from publisher.models import BookConfig, PublishMode, RemoteChapter, ScheduledDay
+from publisher.models import (
+    BookConfig,
+    NovelOperation,
+    PublishMode,
+    RemoteChapter,
+    ScheduledDay,
+)
 from publisher.service import PublishingService
 from publisher.short_story import (
     SHORT_STORY_EXTRA_CATEGORIES,
@@ -26,11 +32,13 @@ from publisher.short_story import (
 )
 from publisher.workflows import (
     PublishRunReport,
+    NovelOperationReport,
     ShortStoryQueueReport,
     ShortStoryRunReport,
     publish_all_scheduled,
     publish_all_short_stories,
     publish_short_story,
+    run_novel_operation,
     sync_novel_status,
 )
 
@@ -39,6 +47,24 @@ _STATUS_LABELS = {
     "pending": "待发布",
     "partial": "部分完成",
     "submitted": "已提交",
+}
+
+_NOVEL_OPERATION_LABELS = {
+    NovelOperation.SCHEDULED: "定时发布",
+    NovelOperation.IMMEDIATE: "立即发布",
+    NovelOperation.DRAFT: "存为草稿",
+    NovelOperation.EDIT_CONTENT: "修改正文",
+    NovelOperation.RESCHEDULE: "修改排期",
+}
+_NOVEL_OPERATION_BY_LABEL = {
+    label: operation for operation, label in _NOVEL_OPERATION_LABELS.items()
+}
+_NOVEL_OPERATION_BUTTONS = {
+    NovelOperation.SCHEDULED: "发布全部排程",
+    NovelOperation.IMMEDIATE: "立即发布",
+    NovelOperation.DRAFT: "存为草稿",
+    NovelOperation.EDIT_CONTENT: "修改正文",
+    NovelOperation.RESCHEDULE: "修改排期",
 }
 
 _SHORT_STORY_CATEGORIES = SHORT_STORY_PRIMARY_CATEGORIES
@@ -477,8 +503,13 @@ class PublisherApp:
         self._selected_book_id: str | None = None
         self._selected_story_id: str | None = None
         self._task_events: Queue[tuple[str, object]] = Queue()
+        self._task_event_after: str | None = None
+        self._root_destroyed = False
         self._task_running = False
         self._task_control: RunControl | None = None
+        self._novel_operation_var = tk.StringVar(
+            value=_NOVEL_OPERATION_LABELS[NovelOperation.SCHEDULED]
+        )
         self._mode_var = tk.StringVar()
         self._limit_var = tk.StringVar()
         self._time_var = tk.StringVar()
@@ -512,7 +543,8 @@ class PublisherApp:
         self._refresh_short_stories()
         if context is not None and not context.active_profile().guide_seen:
             self._root.after(200, self._show_first_run_guide)
-        self._root.after(100, self._drain_task_events)
+        self._root.bind("<Destroy>", self._on_root_destroy, add="+")
+        self._task_event_after = self._root.after(100, self._drain_task_events)
 
     def _configure_styles(self, style: ttk.Style) -> None:
         style.theme_use("clam")
@@ -985,11 +1017,26 @@ class PublisherApp:
             textvariable=self._book_name_var,
             style="ContextTitle.TLabel",
         ).grid(row=0, column=0, sticky="w")
+        ttk.Label(self._book_context, text="本次操作", style="ContextMeta.TLabel").grid(
+            row=0, column=1, sticky="e", padx=(18, 8)
+        )
+        self._novel_operation_box = ttk.Combobox(
+            self._book_context,
+            textvariable=self._novel_operation_var,
+            values=tuple(_NOVEL_OPERATION_BY_LABEL),
+            state="readonly",
+            width=12,
+            style="App.TCombobox",
+        )
+        self._novel_operation_box.grid(row=0, column=2, sticky="e")
+        self._novel_operation_box.bind(
+            "<<ComboboxSelected>>", self._on_novel_operation_changed
+        )
         ttk.Label(
             self._book_context,
             textvariable=self._publish_state_var,
             style="ContextState.TLabel",
-        ).grid(row=0, column=1, sticky="e", padx=(18, 0))
+        ).grid(row=0, column=3, sticky="e", padx=(18, 0))
 
         ttk.Label(main_frame, text="排程设置", style="Section.TLabel").grid(
             row=1, column=0, columnspan=7, sticky="w", pady=(0, 6)
@@ -1230,7 +1277,7 @@ class PublisherApp:
         self._publish_button = ttk.Button(
             actions,
             text="发布全部排程",
-            command=self._start_publish_novel,
+            command=self._start_selected_novel_operation,
             style="Primary.TButton",
         )
         self._publish_button.pack(side="right")
@@ -1835,6 +1882,8 @@ class PublisherApp:
         Thread(target=worker, daemon=True).start()
 
     def _drain_task_events(self) -> None:
+        if self._root_destroyed:
+            return
         try:
             while True:
                 event, payload = self._task_events.get_nowait()
@@ -1852,7 +1901,23 @@ class PublisherApp:
                     self._task_done_handler(payload)
         except Empty:
             pass
-        self._root.after(100, self._drain_task_events)
+        try:
+            self._task_event_after = self._root.after(100, self._drain_task_events)
+        except tk.TclError:
+            self._root_destroyed = True
+            self._task_event_after = None
+
+    def _on_root_destroy(self, event: tk.Event) -> None:
+        if event.widget is not self._root:
+            return
+        self._root_destroyed = True
+        if self._task_event_after is None:
+            return
+        try:
+            self._root.after_cancel(self._task_event_after)
+        except tk.TclError:
+            pass
+        self._task_event_after = None
 
     def _set_task_buttons_enabled(self, enabled: bool) -> None:
         state = "normal" if enabled else "disabled"
@@ -1865,6 +1930,9 @@ class PublisherApp:
             button = getattr(self, name, None)
             if button is not None:
                 button.configure(state=state)
+        operation_box = getattr(self, "_novel_operation_box", None)
+        if operation_box is not None:
+            operation_box.configure(state="readonly" if enabled else "disabled")
         stop_button = getattr(self, "_stop_button", None)
         if stop_button is not None:
             stop_button.configure(
@@ -1976,6 +2044,23 @@ class PublisherApp:
     def _start_recovery_publish(self) -> None:
         self._start_publish_novel()
 
+    def _selected_novel_operation(self) -> NovelOperation:
+        return _NOVEL_OPERATION_BY_LABEL.get(
+            self._novel_operation_var.get(),
+            NovelOperation.SCHEDULED,
+        )
+
+    def _on_novel_operation_changed(self, _event: object = None) -> None:
+        operation = self._selected_novel_operation()
+        self._publish_button.configure(text=_NOVEL_OPERATION_BUTTONS[operation])
+
+    def _start_selected_novel_operation(self) -> None:
+        operation = self._selected_novel_operation()
+        if operation is NovelOperation.SCHEDULED:
+            self._start_publish_novel()
+            return
+        self._start_novel_operation(operation)
+
     def _export_diagnostics(self) -> None:
         if self._selected_book_id is None:
             messagebox.showinfo("请选择作品", "请先从左侧选择本地作品。", parent=self._root)
@@ -2066,6 +2151,64 @@ class PublisherApp:
                 )
 
         self._start_task("正在准备整批发布", operation, done)
+
+    def _start_novel_operation(self, operation_kind: NovelOperation) -> None:
+        if self._selected_book_id is None:
+            messagebox.showinfo("请选择作品", "请先从左侧选择本地作品。", parent=self._root)
+            return
+        if self._task_running:
+            self._task_status_var.set("已有任务正在运行")
+            return
+        book_id = self._selected_book_id
+        control = RunControl()
+        self._task_control = control
+        operation_label = _NOVEL_OPERATION_LABELS[operation_kind]
+
+        def operation() -> NovelOperationReport:
+            gateway = self._make_gateway()
+            try:
+                return run_novel_operation(
+                    self._service,
+                    gateway,
+                    book_id,
+                    operation_kind,
+                    read_body=read_chapter_body,
+                    control=control,
+                    activity_log=self._activity_log,
+                    on_progress=lambda message: self._task_events.put(
+                        ("progress", message)
+                    ),
+                )
+            finally:
+                self._close_gateway(gateway)
+
+        def done(report: NovelOperationReport) -> None:
+            self._load_book(book_id)
+            if report.cancelled:
+                self._task_status_var.set("任务已停止")
+                return
+            if not report.success:
+                self._task_status_var.set(f"{operation_label}未完成")
+                messagebox.showerror(
+                    "操作未完成",
+                    f"第{report.failed_chapter}章：{report.error}",
+                    parent=self._root,
+                )
+                return
+            count = len(report.submitted_numbers)
+            skipped = len(report.skipped_numbers)
+            if count:
+                self._task_status_var.set(f"{operation_label}完成，共处理 {count} 章")
+                messagebox.showinfo(
+                    "操作完成",
+                    f"已完成 {count} 章{operation_label}。"
+                    + (f"\n已跳过 {skipped} 章。" if skipped else ""),
+                    parent=self._root,
+                )
+            else:
+                self._task_status_var.set("没有需要处理的章节")
+
+        self._start_task(f"正在准备{operation_label}", operation, done)
 
     def _start_publish_short_story(self) -> None:
         if not self._save_short_story() or self._selected_story_id is None:
