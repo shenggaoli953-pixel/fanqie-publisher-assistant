@@ -8,9 +8,11 @@ from publisher.browser import (
     DraftFields,
     EdgePublisherGateway,
     FakePublisherGateway,
+    ManagedChapter,
     PublishOutcome,
     PublishBlockedError,
     PublishDraft,
+    ScheduleChange,
     choose_continue_action,
     draft_fields,
     edge_launch_arguments,
@@ -524,7 +526,7 @@ class _PublishSettingSwitch:
         return "true" if name == "aria-checked" and self.enabled else "false"
 
     def click(self) -> None:
-        self.enabled = True
+        self.enabled = not self.enabled
 
 
 class _PublishSettingInput:
@@ -597,6 +599,61 @@ class _PublishSettingsDialog:
             "input[type='radio'][value='2']": self.ai_no,
         }
         return fields[selector]
+
+
+class _DraftSaveButton:
+    def __init__(self, page: "_DraftSavePage") -> None:
+        self._page = page
+
+    @property
+    def last(self) -> "_DraftSaveButton":
+        return self
+
+    def count(self) -> int:
+        return int(self._page.has_save_button)
+
+    def is_visible(self) -> bool:
+        return self._page.has_save_button
+
+    def click(self) -> None:
+        self._page.saved = True
+
+
+class _DraftSaveConfirmation:
+    def __init__(self, page: "_DraftSavePage") -> None:
+        self._page = page
+
+    @property
+    def last(self) -> "_DraftSaveConfirmation":
+        return self
+
+    def count(self) -> int:
+        return int(self._page.saved)
+
+    def is_visible(self) -> bool:
+        return self._page.saved
+
+
+class _DraftSavePage:
+    url = "https://fanqienovel.com/main/writer/book/publish/draft-1"
+
+    def __init__(self, has_save_button: bool = True) -> None:
+        self.has_save_button = has_save_button
+        self.saved = False
+        self.button = _DraftSaveButton(self)
+        self.confirmation = _DraftSaveConfirmation(self)
+
+    def get_by_role(self, role: str, **kwargs):
+        assert role == "button"
+        assert kwargs["name"] == "存草稿"
+        return self.button
+
+    def get_by_text(self, text: str, **_kwargs):
+        assert text == "已保存"
+        return self.confirmation
+
+    def wait_for_timeout(self, _milliseconds: int) -> None:
+        pass
 
 
 class _ConditionalPublishButton:
@@ -827,6 +884,32 @@ class BrowserTests(unittest.TestCase):
         self.assertTrue(dialog.ai_yes.checked)
         self.assertFalse(dialog.ai_no.checked)
 
+    def test_immediate_settings_turn_the_schedule_switch_off(self):
+        dialog = _PublishSettingsDialog()
+        dialog.switch.enabled = True
+
+        EdgePublisherGateway._configure_immediate_settings(dialog, ai_generated=False)
+
+        self.assertFalse(dialog.switch.enabled)
+        self.assertTrue(dialog.ai_no.checked)
+
+    def test_existing_fields_never_rewrite_the_chapter_number(self):
+        gateway = EdgePublisherGateway.__new__(EdgePublisherGateway)
+        page = _ResettingDraftPage(resets=0)
+        page.serial = "8"
+        fields = DraftFields("8", "新标题", "第一段。\n第二段。")
+
+        gateway._fill_existing_fields(page, fields)
+
+        self.assertEqual(page.serial, "8")
+        self.assertEqual(page.title, "新标题")
+        self.assertEqual(page.body, "第一段。\n第二段。")
+        self.assertNotIn("serial", page.write_order)
+
+    def test_draft_requires_a_visible_save_confirmation(self):
+        with self.assertRaisesRegex(PublishBlockedError, "草稿"):
+            EdgePublisherGateway._save_draft(_DraftSavePage(has_save_button=False))
+
     def test_missing_publish_entry_rechecks_non_chapter_notice_before_failing(self):
         page = _NonChapterBackstopPage()
 
@@ -918,6 +1001,108 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(submitted, [1])
         self.assertTrue(results[-1].cancelled)
         self.assertEqual(results[-1].chapter_number, 2)
+
+    def test_immediate_batch_reuses_the_known_remote_snapshot_and_stops_safely(self):
+        gateway = EdgePublisherGateway.__new__(EdgePublisherGateway)
+        gateway._page = object()
+        submitted: list[int] = []
+
+        with (
+            patch.object(gateway, "_open_chapter_manager"),
+            patch.object(
+                gateway,
+                "_submit_immediate_one",
+                side_effect=lambda item: submitted.append(item.chapter_number),
+            ),
+        ):
+            results = gateway.submit_immediately(
+                [draft(1), draft(2), draft(3)],
+                "测试作品",
+                known_remote_numbers=set(),
+                should_stop=lambda: len(submitted) == 1,
+            )
+
+        self.assertEqual(submitted, [1])
+        self.assertTrue(results[-1].cancelled)
+        self.assertEqual(results[-1].chapter_number, 2)
+
+    def test_draft_batch_stops_when_the_platform_reuses_a_draft_identifier(self):
+        gateway = EdgePublisherGateway.__new__(EdgePublisherGateway)
+        gateway._page = object()
+
+        with (
+            patch.object(gateway, "_open_chapter_manager"),
+            patch.object(gateway, "_new_chapter_page", return_value=object()),
+            patch.object(gateway, "_fill_draft_fields"),
+            patch.object(gateway, "_save_draft", side_effect=["draft-1", "draft-1"]),
+        ):
+            results = gateway.save_drafts([draft(1), draft(2), draft(3)], "测试作品")
+
+        self.assertEqual([result.chapter_number for result in results], [1, 2])
+        self.assertTrue(results[0].success)
+        self.assertFalse(results[1].success)
+        self.assertIn("草稿", results[1].error or "")
+
+    def test_existing_content_updates_only_the_snapshotted_chapter(self):
+        gateway = EdgePublisherGateway.__new__(EdgePublisherGateway)
+        gateway._page = object()
+        managed = [ManagedChapter(8, "pending", "/publish/entry-8")]
+        updated: list[int] = []
+
+        with patch.object(
+            gateway,
+            "_submit_existing_content",
+            side_effect=lambda item, chapter: updated.append(chapter.chapter_number),
+        ):
+            results = gateway.update_existing([draft(8)], managed)
+
+        self.assertEqual(updated, [8])
+        self.assertTrue(results[0].success)
+        self.assertTrue(results[0].verified)
+
+    def test_existing_content_stops_at_a_reviewing_chapter(self):
+        gateway = EdgePublisherGateway.__new__(EdgePublisherGateway)
+        gateway._page = object()
+        managed = [
+            ManagedChapter(8, "pending", "/publish/entry-8"),
+            ManagedChapter(9, "reviewing", "/publish/entry-9"),
+        ]
+        updated: list[int] = []
+
+        with patch.object(
+            gateway,
+            "_submit_existing_content",
+            side_effect=lambda item, chapter: updated.append(chapter.chapter_number),
+        ):
+            results = gateway.update_existing([draft(8), draft(9)], managed)
+
+        self.assertEqual(updated, [8])
+        self.assertEqual([result.chapter_number for result in results], [8, 9])
+        self.assertTrue(results[0].success)
+        self.assertTrue(results[1].blocked)
+
+    def test_reschedule_stops_when_a_chapter_is_not_pending(self):
+        gateway = EdgePublisherGateway.__new__(EdgePublisherGateway)
+        gateway._page = object()
+        managed = [
+            ManagedChapter(8, "pending", "/publish/entry-8"),
+            ManagedChapter(9, "published", "/publish/entry-9"),
+        ]
+        changed: list[int] = []
+        publish_at = datetime(2026, 8, 16, 0, 0)
+        changes = [ScheduleChange(8, publish_at), ScheduleChange(9, publish_at)]
+
+        with patch.object(
+            gateway,
+            "_reschedule_one",
+            side_effect=lambda change, chapter: changed.append(chapter.chapter_number),
+        ):
+            results = gateway.reschedule_existing(changes, managed)
+
+        self.assertEqual(changed, [8])
+        self.assertEqual([result.chapter_number for result in results], [8, 9])
+        self.assertTrue(results[0].success)
+        self.assertTrue(results[1].blocked)
 
     def test_draft_form_uses_keyboard_body_input_and_retries_after_a_reset(self):
         gateway = EdgePublisherGateway.__new__(EdgePublisherGateway)

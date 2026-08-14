@@ -248,6 +248,12 @@ class ManagedChapter:
     editor_path: str
 
 
+@dataclass(frozen=True)
+class ScheduleChange:
+    chapter_number: int
+    publish_at: datetime
+
+
 def managed_chapters_from_rows(
     rows: list[tuple[str, str | None]],
 ) -> list[ManagedChapter]:
@@ -353,7 +359,6 @@ class FakePublisherGateway:
                 break
             results.append(SubmissionResult(chapter_number=draft.chapter_number, success=True))
         return results
-
 
 class EdgePublisherGateway:
     _DEFAULT_AUTHOR_URL = "https://fanqienovel.com/writer/zone/"
@@ -539,6 +544,148 @@ class EdgePublisherGateway:
             )
         return results
 
+    def submit_immediately(
+        self,
+        drafts: list[PublishDraft],
+        book_name: str | None = None,
+        *,
+        known_remote_numbers: set[int] | None = None,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> list[SubmissionResult]:
+        self._require_active_book(book_name)
+        known_numbers = (
+            set(known_remote_numbers)
+            if known_remote_numbers is not None
+            else self.existing_remote_chapter_numbers()
+        )
+
+        def submit(draft: PublishDraft) -> None:
+            if draft.chapter_number in known_numbers:
+                return
+            self._open_chapter_manager(book_name)
+            self._submit_immediate_one(draft)
+            known_numbers.add(draft.chapter_number)
+
+        return self._run_items(drafts, submit, should_stop)
+
+    def save_drafts(
+        self,
+        drafts: list[PublishDraft],
+        book_name: str | None = None,
+        *,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> list[SubmissionResult]:
+        self._require_active_book(book_name)
+        draft_ids: set[str] = set()
+
+        def save(draft: PublishDraft) -> None:
+            self._open_chapter_manager(book_name)
+            page = self._new_chapter_page()
+            self._fill_draft_fields(page, draft_fields(draft))
+            draft_id = self._save_draft(page)
+            if draft_id in draft_ids:
+                raise PublishBlockedError("后台复用了草稿标识，已停止避免覆盖前一章")
+            draft_ids.add(draft_id)
+
+        return self._run_items(drafts, save, should_stop)
+
+    def update_existing(
+        self,
+        drafts: list[PublishDraft],
+        managed: list[ManagedChapter],
+        *,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> list[SubmissionResult]:
+        if self._page is None:
+            raise PublishBlockedError("请先打开并登录 Edge")
+        by_number = {chapter.chapter_number: chapter for chapter in managed}
+
+        def update(draft: PublishDraft) -> None:
+            chapter = by_number.get(draft.chapter_number)
+            if chapter is None:
+                raise PublishBlockedError(f"后台未找到第{draft.chapter_number}章")
+            if chapter.status in {"reviewing", "unknown"}:
+                raise PublishBlockedError(
+                    f"第{draft.chapter_number}章当前状态不允许自动修改"
+                )
+            self._submit_existing_content(draft, chapter)
+
+        return self._run_items(drafts, update, should_stop)
+
+    def reschedule_existing(
+        self,
+        changes: list[ScheduleChange],
+        managed: list[ManagedChapter],
+        *,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> list[SubmissionResult]:
+        if self._page is None:
+            raise PublishBlockedError("请先打开并登录 Edge")
+        by_number = {chapter.chapter_number: chapter for chapter in managed}
+
+        def reschedule(change: ScheduleChange) -> None:
+            chapter = by_number.get(change.chapter_number)
+            if chapter is None:
+                raise PublishBlockedError(f"后台未找到第{change.chapter_number}章")
+            if chapter.status != "pending":
+                raise PublishBlockedError(
+                    f"第{change.chapter_number}章不是待发布状态，已停止改排期"
+                )
+            self._reschedule_one(change, chapter)
+
+        return self._run_items(changes, reschedule, should_stop)
+
+    def _require_active_book(self, book_name: str | None) -> None:
+        if self._page is None:
+            raise PublishBlockedError("请先打开并登录 Edge")
+        if not book_name:
+            raise PublishBlockedError("未选择番茄作品")
+
+    @staticmethod
+    def _run_items(items, action, should_stop) -> list[SubmissionResult]:
+        results: list[SubmissionResult] = []
+        for item in items:
+            chapter_number = item.chapter_number
+            if should_stop is not None and should_stop():
+                results.append(
+                    SubmissionResult(
+                        chapter_number=chapter_number,
+                        success=False,
+                        cancelled=True,
+                    )
+                )
+                break
+            try:
+                action(item)
+            except PublishBlockedError as error:
+                results.append(
+                    SubmissionResult(
+                        chapter_number=chapter_number,
+                        success=False,
+                        blocked=True,
+                        error=str(error),
+                    )
+                )
+                break
+            except Exception as error:
+                results.append(
+                    SubmissionResult(
+                        chapter_number=chapter_number,
+                        success=False,
+                        blocked=True,
+                        error=f"番茄后台操作失败: {error}",
+                    )
+                )
+                break
+            results.append(
+                SubmissionResult(
+                    chapter_number=chapter_number,
+                    success=True,
+                    verified=True,
+                )
+            )
+        return results
+
     def close(self) -> None:
         if self._playwright is not None:
             self._playwright.stop()
@@ -624,6 +771,58 @@ class EdgePublisherGateway:
         self._run_comprehensive_check(page)
         self._open_publish_settings(page, draft.publish_at, draft.ai_generated)
 
+    def _submit_immediate_one(self, draft: PublishDraft) -> None:
+        fields = draft_fields(draft)
+        page = self._new_chapter_page()
+        self._fill_draft_fields(page, fields)
+        dialog = self._advance_editor(page, run_check=True)
+        self._configure_immediate_settings(dialog, draft.ai_generated)
+        self._confirm_publish_dialog(page, dialog)
+
+    def _submit_existing_content(
+        self, draft: PublishDraft, chapter: ManagedChapter
+    ) -> None:
+        page = self._open_existing_editor(chapter)
+        self._fill_existing_fields(page, draft_fields(draft))
+        dialog = self._advance_editor(page, run_check=True)
+        self._confirm_publish_dialog(page, dialog)
+
+    def _reschedule_one(
+        self, change: ScheduleChange, chapter: ManagedChapter
+    ) -> None:
+        page = self._open_existing_editor(chapter)
+        dialog = self._advance_editor(page, run_check=False)
+        self._configure_schedule_settings(page, dialog, change.publish_at)
+        self._confirm_publish_dialog(page, dialog)
+
+    def _open_existing_editor(self, chapter: ManagedChapter):
+        if self._page is None:
+            raise PublishBlockedError("请先打开并登录 Edge")
+        editor_url = chapter.editor_path
+        if editor_url.startswith("/"):
+            editor_url = f"https://fanqienovel.com{editor_url}"
+        self._page.goto(editor_url, wait_until="domcontentloaded")
+        title_input = self._page.locator("input[placeholder='请输入标题']")
+        editor = self._page.locator(".syl-editor-container .ProseMirror").first
+        try:
+            title_input.wait_for(state="visible", timeout=10000)
+            editor.wait_for(state="visible", timeout=10000)
+        except Exception as error:
+            raise PublishBlockedError(f"第{chapter.chapter_number}章编辑页未成功打开") from error
+        return self._page
+
+    @staticmethod
+    def _advance_editor(page, *, run_check: bool):
+        next_step = page.get_by_role("button", name="下一步", exact=True)
+        if next_step.count() == 0 or not next_step.is_visible():
+            raise PublishBlockedError("编辑页未找到下一步按钮")
+        next_step.click()
+        EdgePublisherGateway._submit_non_chapter_notice_if_present(page)
+        EdgePublisherGateway._submit_typo_warning_if_present(page)
+        if run_check:
+            EdgePublisherGateway._run_comprehensive_check(page)
+        return EdgePublisherGateway._open_publish_dialog(page)
+
     @staticmethod
     def _fill_draft_fields(page, fields: DraftFields) -> None:
         serial_input = page.locator("input.serial-input").first
@@ -666,6 +865,45 @@ class EdgePublisherGateway:
                 ):
                     return
         raise PublishBlockedError("章节号或标题被后台清空，已停止提交")
+
+    @staticmethod
+    def _fill_existing_fields(page, fields: DraftFields) -> None:
+        title_input = page.locator("input[placeholder='请输入标题']")
+        editor = page.locator(".syl-editor-container .ProseMirror").first
+        for locator in (title_input, editor):
+            locator.wait_for(state="visible", timeout=10000)
+        page.wait_for_timeout(1000)
+
+        editor.focus()
+        page.keyboard.press("Control+A")
+        page.keyboard.insert_text(fields.body)
+        page.wait_for_timeout(700)
+        editor_body = EdgePublisherGateway._normalized_editor_body(editor.inner_text())
+        if editor_body != fields.body:
+            editor.focus()
+            page.keyboard.press("Control+A")
+            page.keyboard.insert_text(fields.body)
+            page.wait_for_timeout(700)
+            editor_body = EdgePublisherGateway._normalized_editor_body(editor.inner_text())
+        if editor_body != fields.body:
+            raise PublishBlockedError("章节正文写入后被后台清空，已停止修改")
+
+        for _ in range(2):
+            title_input.fill(fields.title)
+            page.wait_for_timeout(500)
+            if (
+                title_input.input_value().strip() == fields.title
+                and EdgePublisherGateway._normalized_editor_body(editor.inner_text())
+                == fields.body
+            ):
+                page.wait_for_timeout(500)
+                if (
+                    title_input.input_value().strip() == fields.title
+                    and EdgePublisherGateway._normalized_editor_body(editor.inner_text())
+                    == fields.body
+                ):
+                    return
+        raise PublishBlockedError("章节标题被后台清空，已停止修改")
 
     @staticmethod
     def _normalized_editor_body(value: str) -> str:
@@ -768,13 +1006,21 @@ class EdgePublisherGateway:
     def _open_publish_settings(
         page, publish_at: datetime, ai_generated: bool
     ) -> None:
-        dialog = EdgePublisherGateway._publish_settings_dialog(page)
-        if dialog.count() == 0:
-            EdgePublisherGateway._open_publish_entry(page)
-        dialog = EdgePublisherGateway._wait_for_publish_settings_dialog(page)
+        dialog = EdgePublisherGateway._open_publish_dialog(page)
         EdgePublisherGateway._configure_publish_settings(
             page, dialog, publish_at, ai_generated
         )
+        EdgePublisherGateway._confirm_publish_dialog(page, dialog)
+
+    @staticmethod
+    def _open_publish_dialog(page):
+        dialog = EdgePublisherGateway._publish_settings_dialog(page)
+        if dialog.count() == 0 or not dialog.is_visible():
+            EdgePublisherGateway._open_publish_entry(page)
+        return EdgePublisherGateway._wait_for_publish_settings_dialog(page)
+
+    @staticmethod
+    def _confirm_publish_dialog(page, dialog) -> None:
         confirm = dialog.get_by_role("button", name="确认发布", exact=True)
         if confirm.count() == 0:
             raise PublishBlockedError("发布设置中未找到确认发布按钮")
@@ -791,6 +1037,11 @@ class EdgePublisherGateway:
     def _configure_publish_settings(
         page, dialog, publish_at: datetime, ai_generated: bool
     ) -> None:
+        EdgePublisherGateway._configure_schedule_settings(page, dialog, publish_at)
+        EdgePublisherGateway._configure_ai_declaration(dialog, ai_generated)
+
+    @staticmethod
+    def _configure_schedule_settings(page, dialog, publish_at: datetime) -> None:
         schedule_switch = dialog.get_by_role("switch").last
         if schedule_switch.count() == 0:
             raise PublishBlockedError("发布设置中未找到定时开关")
@@ -815,6 +1066,20 @@ class EdgePublisherGateway:
             or time_input.input_value() != publish_time
         ):
             raise PublishBlockedError("定时发布日期或时间未成功写入")
+
+    @staticmethod
+    def _configure_immediate_settings(dialog, ai_generated: bool) -> None:
+        schedule_switch = dialog.get_by_role("switch").last
+        if schedule_switch.count() == 0:
+            raise PublishBlockedError("发布设置中未找到定时开关")
+        if schedule_switch.get_attribute("aria-checked") == "true":
+            schedule_switch.click()
+        if schedule_switch.get_attribute("aria-checked") == "true":
+            raise PublishBlockedError("定时发布开关未成功关闭")
+        EdgePublisherGateway._configure_ai_declaration(dialog, ai_generated)
+
+    @staticmethod
+    def _configure_ai_declaration(dialog, ai_generated: bool) -> None:
         ai_value = "1" if ai_generated else "2"
         ai_declaration = dialog.locator(
             f"input[type='radio'][value='{ai_value}']"
@@ -825,6 +1090,27 @@ class EdgePublisherGateway:
             ai_declaration.locator("xpath=..").click(force=True)
         if not ai_declaration.is_checked():
             raise PublishBlockedError("AI 声明未成功设置")
+
+    @staticmethod
+    def _save_draft(page) -> str:
+        save = page.get_by_role("button", name="存草稿", exact=True).last
+        if save.count() == 0 or not save.is_visible():
+            raise PublishBlockedError("编辑页未找到存草稿按钮")
+        save.click()
+        saved = page.get_by_text("已保存", exact=True).last
+        for _ in range(30):
+            if saved.count() and saved.is_visible():
+                draft_id = EdgePublisherGateway._draft_identifier(page.url)
+                if draft_id is None:
+                    raise PublishBlockedError("草稿保存后没有独立标识")
+                return draft_id
+            page.wait_for_timeout(200)
+        raise PublishBlockedError("草稿未出现保存成功提示")
+
+    @staticmethod
+    def _draft_identifier(url: str) -> str | None:
+        match = re.search(r"/publish/([^/?#]+)", url)
+        return match.group(1) if match is not None else None
 
     @staticmethod
     def _confirm_publish(page, confirm) -> tuple[PublishOutcome, str]:
