@@ -65,7 +65,7 @@ Replace the existing one-item removal assertion with this test method:
         root.withdraw()
         self.addCleanup(root.destroy)
         app = PublisherApp(root, Service(), object())
-        categories = ("婚恋", "家庭", "复仇", "甜宠", "逆袭", "职场", "校园")
+        categories = ("婚恋", "家庭", "虐文", "婆媳", "打脸逆袭", "现代", "追妻火葬场")
 
         app._set_story_extra_categories(categories)
         app._story_extra_list.yview_moveto(1.0)

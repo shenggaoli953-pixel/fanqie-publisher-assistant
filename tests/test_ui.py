@@ -67,6 +67,36 @@ class UiFormattingTests(unittest.TestCase):
 
         self.assertEqual(app._story_extra_var.get(), "")
 
+    def test_short_story_extra_categories_scroll_and_remove_later_item(self):
+        class Service:
+            def list_books(self):
+                return []
+
+        root = tk.Tk()
+        root.withdraw()
+        self.addCleanup(root.destroy)
+        app = PublisherApp(root, Service(), object())
+        categories = (
+            "婚恋",
+            "家庭",
+            "虐文",
+            "婆媳",
+            "打脸逆袭",
+            "现代",
+            "追妻火葬场",
+        )
+
+        app._set_story_extra_categories(categories)
+
+        self.assertTrue(hasattr(app, "_story_extra_scrollbar"))
+        app._story_extra_list.yview_moveto(1.0)
+        app._story_extra_list.selection_set(6)
+        app._remove_story_extra_category()
+
+        self.assertEqual(app._story_extra_list.cget("height"), 4)
+        self.assertEqual(app._story_extra_scrollbar.cget("orient"), "vertical")
+        self.assertEqual(app._story_extra_categories(), categories[:-1])
+
     def test_schedule_row_tag_gives_over_limit_precedence(self):
         day = ScheduledDay(
             publish_at=datetime(2026, 7, 27, 8, 0),
@@ -131,7 +161,7 @@ class UiFormattingTests(unittest.TestCase):
             "#5D6B52",
         )
 
-    def test_app_uses_the_quiet_writing_workbench_theme(self):
+    def test_app_uses_a_readable_editorial_workbench_theme(self):
         class Service:
             def list_books(self):
                 return []
@@ -141,19 +171,20 @@ class UiFormattingTests(unittest.TestCase):
         self.addCleanup(root.destroy)
         app = PublisherApp(root, Service(), object())
 
-        self.assertEqual(app._header.cget("background"), "#262626")
+        self.assertEqual(app._header.cget("background"), "#202124")
         self.assertEqual(app._header_status.cget("width"), 18)
         self.assertEqual(
             ttk.Style(root).lookup("Primary.TButton", "background"),
-            "#FF6A3D",
+            "#E7653F",
         )
         self.assertEqual(
             ttk.Style(root).lookup("App.Treeview", "rowheight"),
-            34,
+            38,
         )
+        self.assertIn("Microsoft YaHei UI", ttk.Style(root).lookup("App.Treeview", "font"))
         self.assertEqual(
             app._schedule.tag_configure("alternating-row")["background"],
-            "#F7F7F5",
+            "#F8F9FB",
         )
 
     def test_short_story_failure_keeps_browser_trace_out_of_header_status(self):
