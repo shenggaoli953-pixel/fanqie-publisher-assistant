@@ -1,14 +1,17 @@
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from datetime import datetime
 from pathlib import Path
 
 from publisher.activity import ActivityLog, RunControl
 from publisher.browser import (
+    ManagedChapter,
     PreflightStatus,
     PublishBlockedError,
     PublishDraft,
+    ScheduleChange,
 )
-from publisher.models import Chapter, RemoteChapter
+from publisher.models import Chapter, NovelOperation, RemoteChapter
 from publisher.short_story_browser import (
     ShortStoryAgreementRequired,
     ShortStoryPublisher,
@@ -25,6 +28,21 @@ class SyncReport:
 @dataclass(frozen=True)
 class PublishRunReport:
     submitted_numbers: tuple[int, ...]
+    failed_chapter: int | None = None
+    error: str | None = None
+    cancelled: bool = False
+    remaining_numbers: tuple[int, ...] = ()
+
+    @property
+    def success(self) -> bool:
+        return not self.cancelled and self.failed_chapter is None and self.error is None
+
+
+@dataclass(frozen=True)
+class NovelOperationReport:
+    operation: NovelOperation
+    submitted_numbers: tuple[int, ...]
+    skipped_numbers: tuple[int, ...] = ()
     failed_chapter: int | None = None
     error: str | None = None
     cancelled: bool = False
@@ -231,6 +249,249 @@ def publish_all_scheduled(
     if record_activity is not None:
         record_activity("scheduled", "completed")
     return PublishRunReport(tuple(submitted))
+
+
+def run_novel_operation(
+    service,
+    gateway,
+    book_id: str,
+    operation: NovelOperation,
+    *,
+    read_body: Callable[[Path, Chapter], str],
+    on_progress: Callable[[str], None] | None = None,
+    control: RunControl | None = None,
+    activity_log: ActivityLog | None = None,
+) -> NovelOperationReport:
+    if operation is NovelOperation.SCHEDULED:
+        scheduled = publish_all_scheduled(
+            service,
+            gateway,
+            book_id,
+            read_body=read_body,
+            on_progress=on_progress,
+            control=control,
+            activity_log=activity_log,
+        )
+        return NovelOperationReport(
+            operation,
+            scheduled.submitted_numbers,
+            failed_chapter=scheduled.failed_chapter,
+            error=scheduled.error,
+            cancelled=scheduled.cancelled,
+            remaining_numbers=scheduled.remaining_numbers,
+        )
+
+    progress = on_progress or (lambda _message: None)
+    record_activity = activity_log.append if activity_log is not None else None
+    book = service.get_book(book_id)
+    source_chapters = service.selected_source_chapters(book.book_id)
+    if record_activity is not None:
+        record_activity(operation.value, "started")
+    progress("正在连接番茄后台")
+    try:
+        gateway.launch()
+        preflight = gateway.preflight(book.name)
+        if preflight.status is not PreflightStatus.READY:
+            raise PublishBlockedError(preflight.message)
+        progress("正在读取后台章节状态")
+        managed = list(gateway.managed_chapters(book.name))
+    except Exception as error:
+        if record_activity is not None:
+            record_activity(operation.value, "failed", error=str(error))
+        raise
+
+    managed_by_number = {chapter.chapter_number: chapter for chapter in managed}
+    submitted_remote_numbers = {
+        chapter.chapter_number
+        for chapter in managed
+        if chapter.status in {"pending", "reviewing", "published"}
+    }
+    service.reconcile_remote_submissions(book.book_id, submitted_remote_numbers)
+    stop_requested = control.stop_requested if control is not None else None
+
+    if operation is NovelOperation.IMMEDIATE:
+        items = [
+            _draft_for(book, chapter, read_body)
+            for chapter in source_chapters
+            if chapter.number not in managed_by_number
+        ]
+        skipped = tuple(
+            chapter.number
+            for chapter in source_chapters
+            if chapter.number in managed_by_number
+        )
+        progress("正在立即发布章节")
+        results = gateway.submit_immediately(
+            items,
+            book.name,
+            known_remote_numbers=set(managed_by_number),
+            should_stop=stop_requested,
+        )
+    elif operation is NovelOperation.DRAFT:
+        items = [
+            _draft_for(book, chapter, read_body)
+            for chapter in source_chapters
+            if chapter.number not in managed_by_number
+        ]
+        skipped = tuple(
+            chapter.number
+            for chapter in source_chapters
+            if chapter.number in managed_by_number
+        )
+        progress("正在保存章节草稿")
+        results = gateway.save_drafts(
+            items,
+            book.name,
+            should_stop=stop_requested,
+        )
+    elif operation is NovelOperation.EDIT_CONTENT:
+        editable = {
+            "pending",
+            "draft",
+            "published",
+        }
+        items = [
+            _draft_for(book, chapter, read_body)
+            for chapter in source_chapters
+            if (
+                chapter.number in managed_by_number
+                and managed_by_number[chapter.number].status in editable
+            )
+        ]
+        skipped = tuple(
+            chapter.number
+            for chapter in source_chapters
+            if (
+                chapter.number not in managed_by_number
+                or managed_by_number[chapter.number].status not in editable
+            )
+        )
+        progress("正在修改章节正文")
+        results = gateway.update_existing(
+            items,
+            managed,
+            should_stop=stop_requested,
+        )
+    elif operation is NovelOperation.RESCHEDULE:
+        schedule_by_number = {
+            chapter.number: day.publish_at
+            for day in service.get_schedule(book.book_id)
+            for chapter in day.chapters
+        }
+        selected_numbers = {chapter.number for chapter in source_chapters}
+        items = [
+            ScheduleChange(chapter_number, publish_at)
+            for chapter_number, publish_at in schedule_by_number.items()
+            if (
+                chapter_number in selected_numbers
+                and chapter_number in managed_by_number
+                and managed_by_number[chapter_number].status == "pending"
+            )
+        ]
+        skipped = tuple(
+            number
+            for number in sorted(selected_numbers)
+            if number not in {item.chapter_number for item in items}
+        )
+        progress("正在修改章节排期")
+        results = gateway.reschedule_existing(
+            items,
+            managed,
+            should_stop=stop_requested,
+        )
+    else:
+        raise ValueError(f"不支持的小说操作：{operation}")
+
+    report = _operation_report(operation, items, skipped, results)
+    successful = set(report.submitted_numbers)
+    if operation is NovelOperation.IMMEDIATE and successful:
+        service.reconcile_remote_submissions(
+            book.book_id,
+            submitted_remote_numbers | successful,
+        )
+    for chapter_number in report.submitted_numbers:
+        if record_activity is not None:
+            record_activity(
+                operation.value,
+                "submitted",
+                chapter_number=chapter_number,
+            )
+    if record_activity is not None:
+        if report.cancelled:
+            record_activity(operation.value, "stopped")
+        elif report.failed_chapter is not None:
+            record_activity(
+                operation.value,
+                "failed",
+                chapter_number=report.failed_chapter,
+                error=report.error,
+            )
+        else:
+            record_activity(operation.value, "completed")
+    if report.cancelled:
+        progress("任务已停止，未开始下一章")
+    elif report.failed_chapter is not None:
+        progress(f"第{report.failed_chapter}章未完成，任务已停止")
+    else:
+        progress("操作处理完成")
+    return report
+
+
+def _draft_for(book, chapter: Chapter, read_body: Callable[[Path, Chapter], str]) -> PublishDraft:
+    return PublishDraft(
+        chapter_number=chapter.number,
+        title=chapter.title,
+        body=read_body(book.source_dir, chapter),
+        publish_at=datetime.now(),
+        ai_generated=book.ai_generated,
+    )
+
+
+def _operation_report(
+    operation: NovelOperation,
+    items,
+    skipped_numbers: tuple[int, ...],
+    results,
+) -> NovelOperationReport:
+    submitted = tuple(result.chapter_number for result in results if result.success)
+    cancelled = next((result for result in results if result.cancelled), None)
+    if cancelled is not None:
+        return NovelOperationReport(
+            operation,
+            submitted,
+            skipped_numbers,
+            cancelled=True,
+            remaining_numbers=_operation_remaining(items, cancelled.chapter_number),
+        )
+    failed = next((result for result in results if not result.success), None)
+    if failed is not None:
+        return NovelOperationReport(
+            operation,
+            submitted,
+            skipped_numbers,
+            failed_chapter=failed.chapter_number,
+            error=failed.error or "番茄后台未完成操作",
+            remaining_numbers=_operation_remaining(items, failed.chapter_number),
+        )
+    if len(results) != len(items):
+        missing = items[len(results)].chapter_number
+        return NovelOperationReport(
+            operation,
+            submitted,
+            skipped_numbers,
+            failed_chapter=missing,
+            error="番茄后台未返回完整的操作结果",
+            remaining_numbers=_operation_remaining(items, missing),
+        )
+    return NovelOperationReport(operation, submitted, skipped_numbers)
+
+
+def _operation_remaining(items, first_number: int) -> tuple[int, ...]:
+    numbers = [item.chapter_number for item in items]
+    try:
+        return tuple(numbers[numbers.index(first_number) :])
+    except ValueError:
+        return ()
 
 
 def _remaining_numbers(

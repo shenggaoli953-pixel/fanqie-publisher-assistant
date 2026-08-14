@@ -3,8 +3,20 @@ from pathlib import Path
 import unittest
 
 from publisher.activity import RunControl
-from publisher.browser import PreflightResult, PreflightStatus, SubmissionResult
-from publisher.models import BookConfig, Chapter, PublishMode, RemoteChapter, ScheduledDay
+from publisher.browser import (
+    ManagedChapter,
+    PreflightResult,
+    PreflightStatus,
+    SubmissionResult,
+)
+from publisher.models import (
+    BookConfig,
+    Chapter,
+    NovelOperation,
+    PublishMode,
+    RemoteChapter,
+    ScheduledDay,
+)
 from publisher.short_story import ShortStoryConfig
 from publisher.short_story_browser import (
     ShortStoryAgreementRequired,
@@ -15,6 +27,7 @@ from publisher.workflows import (
     publish_all_scheduled,
     publish_all_short_stories,
     publish_short_story,
+    run_novel_operation,
     sync_novel_status,
 )
 
@@ -41,6 +54,7 @@ class _Service:
     def __init__(self, days: list[ScheduledDay]) -> None:
         self.book = _book()
         self.days = days
+        self.source_chapters = [chapter for day in days for chapter in day.chapters]
         self.synced: set[int] | None = None
         self.recorded: list[tuple[int, bool, str | None]] = []
 
@@ -73,6 +87,9 @@ class _Service:
 
     def get_schedule(self, _book_id: str):
         return list(self.days)
+
+    def selected_source_chapters(self, _book_id: str):
+        return list(self.source_chapters)
 
 
 class _Gateway:
@@ -125,6 +142,68 @@ class _Gateway:
                 break
             results.append(SubmissionResult(draft.chapter_number, True, verified=True))
         return results
+
+
+class _OperationGateway:
+    def __init__(self, managed, fail_at: int | None = None, on_submit=None) -> None:
+        self.managed = list(managed)
+        self.fail_at = fail_at
+        self.on_submit = on_submit
+        self.managed_reads = 0
+        self.calls: list[tuple[str, list[int]]] = []
+        self.known_numbers: set[int] | None = None
+
+    def launch(self) -> None:
+        pass
+
+    def preflight(self, _book_name: str) -> PreflightResult:
+        return PreflightResult(PreflightStatus.READY, "后台已连接")
+
+    def managed_chapters(self, _book_name: str):
+        self.managed_reads += 1
+        return list(self.managed)
+
+    def _submit(self, operation: str, items, should_stop=None):
+        self.calls.append((operation, [item.chapter_number for item in items]))
+        results = []
+        for item in items:
+            if should_stop is not None and should_stop():
+                results.append(SubmissionResult(item.chapter_number, False, cancelled=True))
+                break
+            if self.on_submit is not None:
+                self.on_submit(item.chapter_number)
+            if item.chapter_number == self.fail_at:
+                results.append(
+                    SubmissionResult(
+                        item.chapter_number,
+                        False,
+                        blocked=True,
+                        error="真实失败",
+                    )
+                )
+                break
+            results.append(SubmissionResult(item.chapter_number, True, verified=True))
+        return results
+
+    def submit_immediately(
+        self,
+        drafts,
+        _book_name: str,
+        *,
+        known_remote_numbers=None,
+        should_stop=None,
+    ):
+        self.known_numbers = set(known_remote_numbers or ())
+        return self._submit("immediate", drafts, should_stop)
+
+    def save_drafts(self, drafts, _book_name: str, *, should_stop=None):
+        return self._submit("draft", drafts, should_stop)
+
+    def update_existing(self, drafts, _managed, *, should_stop=None):
+        return self._submit("edit-content", drafts, should_stop)
+
+    def reschedule_existing(self, changes, _managed, *, should_stop=None):
+        return self._submit("reschedule", changes, should_stop)
 
 
 class WorkflowTests(unittest.TestCase):
@@ -222,6 +301,69 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(report.remote_count, 0)
         self.assertEqual(report.message, "后台已连接")
         self.assertEqual(service.synced, set())
+
+    def test_immediate_operation_reads_the_managed_list_once_and_skips_existing(self):
+        service = _Service([_day(1), _day(2), _day(3)])
+        gateway = _OperationGateway(
+            [ManagedChapter(1, "pending", "/publish/entry-1")]
+        )
+
+        report = run_novel_operation(
+            service,
+            gateway,
+            service.book.book_id,
+            NovelOperation.IMMEDIATE,
+            read_body=lambda _path, _chapter: "正文",
+        )
+
+        self.assertTrue(report.success)
+        self.assertEqual(report.submitted_numbers, (2, 3))
+        self.assertEqual(report.skipped_numbers, (1,))
+        self.assertEqual(gateway.managed_reads, 1)
+        self.assertEqual(gateway.calls, [("immediate", [2, 3])])
+        self.assertEqual(gateway.known_numbers, {1})
+
+    def test_draft_operation_stops_after_the_first_failed_chapter(self):
+        service = _Service([_day(1), _day(2), _day(3)])
+        gateway = _OperationGateway([], fail_at=2)
+
+        report = run_novel_operation(
+            service,
+            gateway,
+            service.book.book_id,
+            NovelOperation.DRAFT,
+            read_body=lambda _path, _chapter: "正文",
+        )
+
+        self.assertFalse(report.success)
+        self.assertEqual(report.submitted_numbers, (1,))
+        self.assertEqual(report.failed_chapter, 2)
+        self.assertEqual(report.remaining_numbers, (2, 3))
+        self.assertEqual(gateway.managed_reads, 1)
+        self.assertEqual(gateway.calls, [("draft", [1, 2, 3])])
+
+    def test_reschedule_only_sends_pending_remote_chapters(self):
+        service = _Service([_day(1), _day(2)])
+        gateway = _OperationGateway(
+            [
+                ManagedChapter(1, "pending", "/publish/entry-1"),
+                ManagedChapter(2, "published", "/publish/entry-2"),
+            ]
+        )
+
+        report = run_novel_operation(
+            service,
+            gateway,
+            service.book.book_id,
+            NovelOperation.RESCHEDULE,
+            read_body=lambda _path, _chapter: "正文",
+        )
+
+        self.assertTrue(report.success)
+        self.assertEqual(report.submitted_numbers, (1,))
+        self.assertEqual(report.skipped_numbers, (2,))
+        self.assertEqual(gateway.managed_reads, 1)
+        self.assertEqual(gateway.calls, [("reschedule", [1])])
 
     def test_short_story_agreement_keeps_the_remote_draft_for_resume(self):
         config = ShortStoryConfig(
