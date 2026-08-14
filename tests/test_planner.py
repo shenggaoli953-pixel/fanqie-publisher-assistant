@@ -16,7 +16,12 @@ def chapter(number: int, character_count: int) -> Chapter:
     )
 
 
-def config_for(mode: PublishMode, limit: int, publish_time: time) -> BookConfig:
+def config_for(
+    mode: PublishMode,
+    limit: int,
+    publish_time: time,
+    publish_times: tuple[time, ...] = (),
+) -> BookConfig:
     return BookConfig(
         book_id="robot",
         name="机器人",
@@ -25,6 +30,7 @@ def config_for(mode: PublishMode, limit: int, publish_time: time) -> BookConfig:
         mode=mode,
         limit=limit,
         next_chapter=1,
+        publish_times=publish_times,
     )
 
 
@@ -55,3 +61,49 @@ class PlannerTests(unittest.TestCase):
         schedule = build_schedule([chapter(1, 11)], config, date(2026, 7, 27))
 
         self.assertTrue(schedule[0].over_limit)
+
+    def test_chapter_mode_distributes_a_day_across_each_selected_time(self):
+        config = config_for(
+            PublishMode.CHAPTERS,
+            5,
+            time(8, 0),
+            publish_times=(time(8, 0), time(12, 0), time(20, 0)),
+        )
+
+        schedule = build_schedule(
+            [chapter(number, 1) for number in range(1, 6)],
+            config,
+            date(2026, 8, 15),
+        )
+
+        self.assertEqual(
+            [day.publish_at.strftime("%H:%M") for day in schedule],
+            ["08:00", "08:01", "12:00", "12:01", "20:00"],
+        )
+        self.assertEqual(
+            [day.chapters[0].number for day in schedule],
+            [1, 2, 3, 4, 5],
+        )
+
+    def test_word_limit_starts_the_next_day_after_time_distribution(self):
+        config = config_for(
+            PublishMode.WORDS,
+            10,
+            time(8, 0),
+            publish_times=(time(8, 0), time(12, 0)),
+        )
+
+        schedule = build_schedule(
+            [chapter(1, 6), chapter(2, 4), chapter(3, 5)],
+            config,
+            date(2026, 8, 15),
+        )
+
+        self.assertEqual(
+            [day.publish_at for day in schedule],
+            [
+                datetime(2026, 8, 15, 8, 0),
+                datetime(2026, 8, 15, 12, 0),
+                datetime(2026, 8, 16, 8, 0),
+            ],
+        )
