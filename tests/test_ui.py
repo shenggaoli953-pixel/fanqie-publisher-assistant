@@ -271,6 +271,52 @@ class UiFormattingTests(unittest.TestCase):
                 {"version": 2, "theme": "Codex 浅色"},
             )
 
+    def test_invalid_theme_preference_uses_codex_light(self):
+        class Service:
+            def list_books(self):
+                return []
+
+        with TemporaryDirectory() as temp_dir:
+            settings_path = Path(temp_dir) / "ui-settings.json"
+            settings_path.write_text("not-json", encoding="utf-8")
+            root = tk.Tk()
+            root.withdraw()
+            self.addCleanup(root.destroy)
+
+            app = PublisherApp(
+                root,
+                Service(),
+                object(),
+                theme_settings_path=settings_path,
+            )
+
+        self.assertEqual(app._theme_name_var.get(), "Codex 浅色")
+
+    def test_legacy_theme_write_error_keeps_codex_light(self):
+        class Service:
+            def list_books(self):
+                return []
+
+        with TemporaryDirectory() as temp_dir:
+            settings_path = Path(temp_dir) / "ui-settings.json"
+            settings_path.write_text(
+                json.dumps({"theme": "暖灰橙"}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            root = tk.Tk()
+            root.withdraw()
+            self.addCleanup(root.destroy)
+
+            with patch("pathlib.Path.write_text", side_effect=OSError):
+                app = PublisherApp(
+                    root,
+                    Service(),
+                    object(),
+                    theme_settings_path=settings_path,
+                )
+
+        self.assertEqual(app._theme_name_var.get(), "Codex 浅色")
+
     def test_minimum_window_keeps_schedule_panels_usable(self):
         class Service:
             def list_books(self):
