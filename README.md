@@ -4,10 +4,10 @@
 
 ## 下载使用
 
-普通用户请在 [Releases](https://github.com/shenggaoli953-pixel/fanqie-publisher-assistant/releases) 下载 `FanqiePublisher-Share.zip`，完整解压后运行：
+普通用户请在 [Releases](https://github.com/shenggaoli953-pixel/fanqie-publisher-assistant/releases) 下载最新的 `FanqiePublisher-v*.zip`，完整解压后运行：
 
 ```text
-release\FanqiePublisher\FanqiePublisher.exe
+FanqiePublisher\FanqiePublisher.exe
 ```
 
 首次启动会在解压目录创建 `data` 文件夹，并在工具自己的 Edge 配置中登录番茄账号。
