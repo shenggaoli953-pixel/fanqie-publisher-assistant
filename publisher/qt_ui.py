@@ -5,7 +5,7 @@ from threading import Thread
 from uuid import uuid4
 import webbrowser
 
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QSize, QTimer, Qt
 from PySide6.QtWidgets import (
     QFrame,
     QCheckBox,
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListView,
     QListWidget,
     QMainWindow,
     QMenu,
@@ -396,7 +397,13 @@ class PublisherWindow(QMainWindow):
         self.story_extra_count_label.setObjectName("muted")
         layout.addWidget(self.story_extra_count_label)
         self.story_extra_list = QListWidget(section)
-        self.story_extra_list.setFixedHeight(260)
+        self.story_extra_list.setViewMode(QListView.IconMode)
+        self.story_extra_list.setFlow(QListView.LeftToRight)
+        self.story_extra_list.setWrapping(True)
+        self.story_extra_list.setResizeMode(QListView.Adjust)
+        self.story_extra_list.setMovement(QListView.Static)
+        self.story_extra_list.setGridSize(QSize(172, 38))
+        self.story_extra_list.setFixedHeight(132)
         self.story_extra_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         layout.addWidget(self.story_extra_list)
         return section

@@ -108,6 +108,7 @@ class QtUiTests(unittest.TestCase):
         self.assertLessEqual(
             last_rect.bottom(), window.story_extra_list.viewport().height()
         )
+        self.assertLessEqual(window.story_extra_list.height(), 140)
 
     def test_running_task_disables_publish_controls_but_keeps_stop_available(self):
         window = PublisherWindow(FakeService(), object())
