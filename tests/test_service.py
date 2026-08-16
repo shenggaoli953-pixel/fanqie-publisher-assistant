@@ -48,6 +48,14 @@ class ServiceTests(unittest.TestCase):
     def test_list_books_returns_each_saved_book(self):
         self.assertEqual([book.book_id for book in self.service.list_books()], ["robot"])
 
+    def test_delete_book_removes_its_workbench_entry_and_schedule_state(self):
+        self.service.delete_book("robot")
+
+        self.assertEqual(self.service.list_books(), [])
+        self.assertIsNone(self.repository.load_state("robot"))
+        with self.assertRaisesRegex(KeyError, "未知书籍"):
+            self.service.get_book("robot")
+
     def test_get_book_state_returns_the_selected_book_state(self):
         state = self.service.get_book_state("robot")
 
@@ -55,10 +63,12 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(state.last_failed_chapter, None)
 
     def test_short_story_configs_can_be_added_and_updated(self):
+        source_path = self.root / "夜航.txt"
+        source_path.write_text("短故事正文", encoding="utf-8")
         config = ShortStoryConfig(
             story_id="story-1",
             name="夜航",
-            source_path=self.root / "夜航.txt",
+            source_path=source_path,
             cover_path=self.root / "cover.png",
             primary_category="其他",
             consent_confirmed=True,
@@ -84,6 +94,26 @@ class ServiceTests(unittest.TestCase):
             saved.remote_draft_url,
             "https://fanqienovel.com/main/writer/publish-short/123",
         )
+
+    def test_delete_short_story_keeps_its_local_source_file(self):
+        source_path = self.root / "夜航.txt"
+        source_path.write_text("短故事正文", encoding="utf-8")
+        config = ShortStoryConfig(
+            story_id="story-1",
+            name="夜航",
+            source_path=source_path,
+            cover_path=self.root / "cover.png",
+            primary_category="其他",
+            consent_confirmed=True,
+        )
+        self.service.add_short_story(config)
+
+        self.service.delete_short_story("story-1")
+
+        self.assertEqual(self.service.list_short_stories(), [])
+        self.assertTrue(source_path.exists())
+        with self.assertRaisesRegex(KeyError, "未知短故事"):
+            self.service.get_short_story("story-1")
 
     def test_paused_book_has_no_schedule_and_cannot_be_confirmed(self):
         self.service.add_book(

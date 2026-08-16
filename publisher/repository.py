@@ -48,6 +48,11 @@ class JsonRepository:
     def save_state(self, state: BookState) -> None:
         self._write_json(self._state_path(state.book_id), state.to_dict())
 
+    def delete_state(self, book_id: str) -> None:
+        path = self._state_path(book_id)
+        if path.exists():
+            path.unlink()
+
     def _state_path(self, book_id: str) -> Path:
         safe_id = "".join(
             character for character in book_id if character.isalnum() or character in "-_"

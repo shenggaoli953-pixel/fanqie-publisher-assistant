@@ -434,6 +434,8 @@ class PublisherWindow(QMainWindow):
         section = QWidget(parent)
         layout = QHBoxLayout(section)
         layout.setContentsMargins(0, 0, 0, 0)
+        self.delete_story_button = QPushButton("删除当前短故事", section)
+        self.delete_story_button.clicked.connect(self._delete_current_short_story)
         self.story_save_button = QPushButton("保存短故事", section)
         self.story_save_button.clicked.connect(self.save_short_story)
         self.story_open_edge_button = QPushButton("在 Edge 中查看", section)
@@ -441,6 +443,7 @@ class PublisherWindow(QMainWindow):
         self.story_publish_button = QPushButton("发布全部未发布短故事", section)
         self.story_publish_button.setProperty("primary", True)
         self.story_publish_button.clicked.connect(self._start_publish_short_stories)
+        layout.addWidget(self.delete_story_button)
         layout.addWidget(self.story_save_button)
         layout.addWidget(self.story_open_edge_button)
         layout.addStretch(1)
@@ -490,6 +493,33 @@ class PublisherWindow(QMainWindow):
         self.story_ai_box.setChecked(True)
         self.story_consent_box.setChecked(False)
         self.story_preview.setPlainText("选择正文文件或目录后会显示标题、字数和自动分类。")
+
+    def _delete_current_short_story(self) -> None:
+        if self._task_running:
+            self.set_task_status("任务运行中，暂不能删除短故事")
+            return
+        if self._selected_story_id is None:
+            QMessageBox.information(self, "请选择短故事", "请先从左侧选择要删除的短故事。")
+            return
+        story = self._service.get_short_story(self._selected_story_id)
+        answer = QMessageBox.question(
+            self,
+            "删除短故事",
+            f"确定从工作台删除《{story.name}》吗？\n不会删除原始正文和封面文件。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer is not QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self._service.delete_short_story(story.story_id)
+        except KeyError as error:
+            QMessageBox.critical(self, "无法删除短故事", str(error))
+            return
+        self._selected_story_id = None
+        self._new_story()
+        self.refresh_short_stories()
+        self.set_task_status(f"已从工作台移除短故事：{story.name}")
 
     def _choose_story_source(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(
@@ -796,12 +826,15 @@ class PublisherWindow(QMainWindow):
         self.open_edge_button = QPushButton("在 Edge 中查看", section)
         self.sync_button = QPushButton("同步后台状态", section)
         self.preview_button = QPushButton("查看发布清单", section)
+        self.delete_book_button = QPushButton("删除当前作品", section)
         self.open_edge_button.clicked.connect(self._start_open_edge)
         self.sync_button.clicked.connect(self._start_check_edge)
         self.preview_button.clicked.connect(self._open_publish_preview)
+        self.delete_book_button.clicked.connect(self._delete_current_book)
         tools.addWidget(self.open_edge_button)
         tools.addWidget(self.sync_button)
         tools.addWidget(self.preview_button)
+        tools.addWidget(self.delete_book_button)
         tools.addStretch(1)
         layout.addLayout(tools)
         primary = QHBoxLayout()
@@ -944,6 +977,36 @@ class PublisherWindow(QMainWindow):
             return
         self.load_book(self._selected_book_id)
         self.set_task_status("排程设置已保存")
+
+    def _delete_current_book(self) -> None:
+        if self._task_running:
+            self.set_task_status("任务运行中，暂不能删除作品")
+            return
+        if self._selected_book_id is None:
+            QMessageBox.information(self, "请选择作品", "请先从左侧选择要删除的作品。")
+            return
+        book = self._service.get_book(self._selected_book_id)
+        answer = QMessageBox.question(
+            self,
+            "删除作品",
+            f"确定从工作台删除《{book.name}》吗？\n会清除本软件的排程记录，但不会删除本地正文目录。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer is not QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self._service.delete_book(book.book_id)
+        except KeyError as error:
+            QMessageBox.critical(self, "无法删除作品", str(error))
+            return
+        self._selected_book_id = None
+        self.book_name_label.setText("未选择作品")
+        self.book_source_label.setText("从左侧选择作品后显示正文目录和排程状态。")
+        self.schedule_table.setRowCount(0)
+        self.schedule_detail_table.setRowCount(0)
+        self.refresh_books()
+        self.set_task_status(f"已从工作台移除作品：{book.name}")
 
     def _pause_publishing(self) -> None:
         self.start_date_edit.clear()
@@ -1117,6 +1180,8 @@ class PublisherWindow(QMainWindow):
             self.story_publish_button,
             self.story_save_button,
             self.story_open_edge_button,
+            self.delete_story_button,
+            self.delete_book_button,
             self.update_action,
             self.diagnostics_action,
             self.account_action,

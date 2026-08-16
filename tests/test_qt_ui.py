@@ -57,6 +57,13 @@ class QtUiTests(unittest.TestCase):
         self.assertEqual(window.novel_splitter.count(), 2)
         self.assertEqual(window.novel_operation_button.text(), "发布全部排程")
 
+    def test_delete_controls_are_visible_for_books_and_short_stories(self):
+        window = PublisherWindow(FakeService(), object())
+        self.addCleanup(window.close)
+
+        self.assertEqual(window.delete_story_button.text(), "删除当前短故事")
+        self.assertEqual(window.delete_book_button.text(), "删除当前作品")
+
     def test_publish_controls_stay_outside_the_scrollable_editors(self):
         window = PublisherWindow(FakeService(), object())
         self.addCleanup(window.close)

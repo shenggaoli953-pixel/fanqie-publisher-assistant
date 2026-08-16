@@ -42,6 +42,15 @@ class PublishingService:
     def list_books(self) -> list[BookConfig]:
         return self._repository.load_books()
 
+    def delete_book(self, book_id: str) -> None:
+        books = self._repository.load_books()
+        if not any(book.book_id == book_id for book in books):
+            raise KeyError(f"未知书籍: {book_id}")
+        self._repository.save_books(
+            [book for book in books if book.book_id != book_id]
+        )
+        self._repository.delete_state(book_id)
+
     def list_short_stories(self) -> list[ShortStoryConfig]:
         return self._repository.load_short_stories()
 
@@ -56,6 +65,14 @@ class PublishingService:
             if story.story_id == story_id:
                 return story
         raise KeyError(f"未知短故事: {story_id}")
+
+    def delete_short_story(self, story_id: str) -> None:
+        stories = self._repository.load_short_stories()
+        if not any(story.story_id == story_id for story in stories):
+            raise KeyError(f"未知短故事: {story_id}")
+        self._repository.save_short_stories(
+            [story for story in stories if story.story_id != story_id]
+        )
 
     def update_short_story(self, config: ShortStoryConfig) -> None:
         stories = self._repository.load_short_stories()
