@@ -44,6 +44,21 @@ class ChapterScanTests(unittest.TestCase):
 
         self.assertEqual([chapter.number for chapter in chapters], [1])
 
+    def test_scan_ignores_software_documentation_directories(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            body = root / "正文"
+            body.mkdir()
+            (body / "第001章-开始.txt").write_text("第一章", encoding="utf-8")
+            docs = root / "docs" / "superpowers"
+            docs.mkdir(parents=True)
+            (docs / "2026-07-18-plan.md").write_text("计划 A", encoding="utf-8")
+            (docs / "2026-07-27-plan.md").write_text("计划 B", encoding="utf-8")
+
+            chapters = scan_chapters(root)
+
+        self.assertEqual([chapter.number for chapter in chapters], [1])
+
     def test_discover_project_prefers_named_body_directory(self):
         with TemporaryDirectory() as temp_dir:
             project = Path(temp_dir) / "电赛小说"

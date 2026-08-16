@@ -16,6 +16,15 @@ _CHAPTER_NAME_PATTERNS = (
 )
 _SUPPORTED_CHAPTER_SUFFIXES = {".txt", ".md"}
 _MARKDOWN_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+(.*)$")
+_IGNORED_CHAPTER_DIRECTORY_NAMES = {
+    "build",
+    "data",
+    "dist",
+    "docs",
+    "node_modules",
+    "release",
+    "__pycache__",
+}
 
 
 class ChapterParseError(ValueError):
@@ -78,6 +87,7 @@ def scan_chapters(source_dir: Path) -> list[Chapter]:
             path
             for path in source_dir.rglob("*")
             if path.is_file() and path.suffix.lower() in _SUPPORTED_CHAPTER_SUFFIXES
+            and _is_chapter_source_path(source_dir, path)
         ),
         key=lambda path: str(path.relative_to(source_dir)).lower(),
     )
@@ -149,6 +159,14 @@ def _parse_chapter_name(stem: str) -> tuple[int, str] | None:
         if match is not None:
             return int(match.group(1)), match.group(2).strip()
     return None
+
+
+def _is_chapter_source_path(source_dir: Path, path: Path) -> bool:
+    return all(
+        not directory.startswith(".")
+        and directory.casefold() not in _IGNORED_CHAPTER_DIRECTORY_NAMES
+        for directory in path.relative_to(source_dir).parts[:-1]
+    )
 
 
 def _cleanup_markdown_headings(text: str) -> str:
