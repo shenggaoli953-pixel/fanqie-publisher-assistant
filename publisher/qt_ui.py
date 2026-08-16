@@ -5,13 +5,14 @@ from threading import Thread
 from uuid import uuid4
 import webbrowser
 
-from PySide6.QtCore import QSize, QTimer, Qt
+from PySide6.QtCore import QDate, QSize, QTimer, Qt
 from PySide6.QtWidgets import (
     QFrame,
     QCheckBox,
     QComboBox,
     QDialog,
     QApplication,
+    QDateEdit,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -84,7 +85,36 @@ _STATUS_LABELS = {"pending": "待发布", "partial": "部分完成", "submitted"
 
 def _parse_publish_start_date(value: str) -> date | None:
     normalized = value.strip()
-    return date.fromisoformat(normalized) if normalized else None
+    if not normalized:
+        return None
+    pieces = normalized.split("-")
+    if len(pieces) == 3 and all(piece.isdigit() for piece in pieces):
+        return date(*(int(piece) for piece in pieces))
+    return date.fromisoformat(normalized)
+
+
+def _publish_start_date_picker(parent: QWidget) -> QDateEdit:
+    picker = QDateEdit(parent)
+    picker.setDisplayFormat("yyyy-MM-dd")
+    picker.setCalendarPopup(True)
+    picker.setMinimumDate(QDate(2000, 1, 1))
+    picker.setSpecialValueText("暂不发布")
+    picker.setDate(picker.minimumDate())
+    return picker
+
+
+def _date_picker_value(picker: QDateEdit) -> date | None:
+    selected = picker.date()
+    if selected == picker.minimumDate():
+        return None
+    return date(selected.year(), selected.month(), selected.day())
+
+
+def _set_date_picker_value(picker: QDateEdit, value: date | None) -> None:
+    if value is None:
+        picker.setDate(picker.minimumDate())
+        return
+    picker.setDate(QDate(value.year, value.month, value.day))
 
 
 def _parse_publish_end_chapter(value: str) -> int | None:
@@ -768,7 +798,8 @@ class PublisherWindow(QMainWindow):
         self.mode_box.addItems((PublishMode.WORDS.value, PublishMode.CHAPTERS.value))
         self.limit_edit = QLineEdit(section)
         self.time_edit = QLineEdit(section)
-        self.start_date_edit = QLineEdit(section)
+        self.time_edit.setPlaceholderText("例如 00:00；多个时间用逗号分隔")
+        self.start_date_edit = _publish_start_date_picker(section)
         self.chapter_start_edit = QLineEdit(section)
         self.chapter_end_edit = QLineEdit(section)
         self.ai_generated_box = QCheckBox("AI 生成：是", section)
@@ -894,9 +925,7 @@ class PublisherWindow(QMainWindow):
         self.time_edit.setText(
             ", ".join(value.isoformat(timespec="minutes") for value in book.effective_publish_times)
         )
-        self.start_date_edit.setText(
-            book.publish_start_date.isoformat() if book.publish_start_date else ""
-        )
+        _set_date_picker_value(self.start_date_edit, book.publish_start_date)
         self.chapter_start_edit.setText(str(book.next_chapter))
         self.chapter_end_edit.setText(
             str(book.publish_end_chapter) if book.publish_end_chapter is not None else ""
@@ -967,7 +996,7 @@ class PublisherWindow(QMainWindow):
                 limit=int(self.limit_edit.text()),
                 publish_time=publish_times[0],
                 publish_times=publish_times,
-                publish_start_date=_parse_publish_start_date(self.start_date_edit.text()),
+                publish_start_date=_date_picker_value(self.start_date_edit),
                 next_chapter=int(self.chapter_start_edit.text()),
                 publish_end_chapter=_parse_publish_end_chapter(self.chapter_end_edit.text()),
                 ai_generated=self.ai_generated_box.isChecked(),
@@ -1009,7 +1038,7 @@ class PublisherWindow(QMainWindow):
         self.set_task_status(f"已从工作台移除作品：{book.name}")
 
     def _pause_publishing(self) -> None:
-        self.start_date_edit.clear()
+        _set_date_picker_value(self.start_date_edit, None)
         self.publish_state_label.setText("暂不发布（保存后生效）")
 
     def _open_add_book(self) -> None:
@@ -1031,7 +1060,8 @@ class PublisherWindow(QMainWindow):
         mode_box.addItems((PublishMode.WORDS.value, PublishMode.CHAPTERS.value))
         limit_edit = QLineEdit("10000", dialog)
         time_edit = QLineEdit("00:00", dialog)
-        start_date_edit = QLineEdit(dialog)
+        time_edit.setPlaceholderText("例如 00:00；多个时间用逗号分隔")
+        start_date_edit = _publish_start_date_picker(dialog)
         end_edit = QLineEdit(dialog)
         ai_box = QCheckBox("AI 生成：是", dialog)
         ai_box.setChecked(True)
@@ -1087,7 +1117,7 @@ class PublisherWindow(QMainWindow):
                     mode=PublishMode(mode_box.currentText()),
                     limit=int(limit_edit.text()),
                     next_chapter=int(start_edit.text()),
-                    publish_start_date=_parse_publish_start_date(start_date_edit.text()),
+                    publish_start_date=_date_picker_value(start_date_edit),
                     publish_end_chapter=_parse_publish_end_chapter(end_edit.text()),
                     ai_generated=ai_box.isChecked(),
                 )

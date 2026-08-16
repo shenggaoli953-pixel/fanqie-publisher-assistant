@@ -1,3 +1,4 @@
+from datetime import date
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -6,12 +7,12 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QDateEdit, QMessageBox
 
 from publisher.activity import RunControl
 from publisher.models import NovelOperation
 from publisher.qt_theme import QtThemeStore
-from publisher.qt_ui import PublisherWindow
+from publisher.qt_ui import PublisherWindow, _parse_publish_start_date
 from publisher.short_story import ShortStoryConfig
 
 
@@ -58,6 +59,18 @@ class QtUiTests(unittest.TestCase):
 
         self.assertEqual(window.novel_splitter.count(), 2)
         self.assertEqual(window.novel_operation_button.text(), "发布全部排程")
+
+    def test_publish_start_date_uses_a_calendar_picker(self):
+        window = PublisherWindow(FakeService(), object())
+        self.addCleanup(window.close)
+
+        self.assertIsInstance(window.start_date_edit, QDateEdit)
+        self.assertTrue(window.start_date_edit.calendarPopup())
+        self.assertEqual(window.start_date_edit.displayFormat(), "yyyy-MM-dd")
+        self.assertEqual(window.start_date_edit.specialValueText(), "暂不发布")
+
+    def test_publish_start_date_accepts_unpadded_legacy_input(self):
+        self.assertEqual(_parse_publish_start_date("2026-8-1"), date(2026, 8, 1))
 
     def test_delete_controls_are_visible_for_books_and_short_stories(self):
         window = PublisherWindow(FakeService(), object())
