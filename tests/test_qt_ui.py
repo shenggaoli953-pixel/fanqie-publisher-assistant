@@ -2,15 +2,17 @@ import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from publisher.activity import RunControl
 from publisher.models import NovelOperation
 from publisher.qt_theme import QtThemeStore
 from publisher.qt_ui import PublisherWindow
+from publisher.short_story import ShortStoryConfig
 
 
 class FakeService:
@@ -63,6 +65,45 @@ class QtUiTests(unittest.TestCase):
 
         self.assertEqual(window.delete_story_button.text(), "删除当前短故事")
         self.assertEqual(window.delete_book_button.text(), "删除当前作品")
+
+    def test_confirmed_short_story_deletion_accepts_qt_button_value(self):
+        class DeleteService(FakeService):
+            def __init__(self):
+                self.story = ShortStoryConfig(
+                    story_id="story-1",
+                    name="测试短故事",
+                    source_path=Path("missing.txt"),
+                    cover_path=Path("cover.png"),
+                    primary_category="其他",
+                    consent_confirmed=True,
+                )
+                self.deleted_story_id = None
+
+            def list_short_stories(self):
+                return [] if self.deleted_story_id else [self.story]
+
+            def get_short_story(self, story_id):
+                if story_id != self.story.story_id or self.deleted_story_id:
+                    raise KeyError(story_id)
+                return self.story
+
+            def delete_short_story(self, story_id):
+                self.deleted_story_id = story_id
+
+        service = DeleteService()
+        window = PublisherWindow(service, object())
+        self.addCleanup(window.close)
+        window._selected_story_id = service.story.story_id
+
+        with patch.object(
+            QMessageBox,
+            "question",
+            return_value=int(QMessageBox.StandardButton.Yes),
+        ):
+            window._delete_current_short_story()
+
+        self.assertEqual(service.deleted_story_id, service.story.story_id)
+        self.assertEqual(window.story_list.count(), 0)
 
     def test_publish_controls_stay_outside_the_scrollable_editors(self):
         window = PublisherWindow(FakeService(), object())
