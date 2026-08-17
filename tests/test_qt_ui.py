@@ -79,6 +79,37 @@ class QtUiTests(unittest.TestCase):
         self.assertEqual(window.delete_story_button.text(), "删除当前短故事")
         self.assertEqual(window.delete_book_button.text(), "删除当前作品")
 
+    def test_short_story_page_exposes_batch_import_button(self):
+        window = PublisherWindow(FakeService(), object())
+        self.addCleanup(window.close)
+
+        self.assertEqual(window.import_story_folder_button.text(), "批量导入文件夹")
+
+    def test_short_story_list_marks_entries_without_a_cover(self):
+        story = ShortStoryConfig(
+            story_id="pending",
+            name="待补封面",
+            source_path=Path("story.txt"),
+            cover_path=None,
+            primary_category="婚姻家庭",
+        )
+
+        class StoryService(FakeService):
+            def list_short_stories(self):
+                return [story]
+
+            def get_short_story(self, story_id):
+                if story_id != story.story_id:
+                    raise KeyError(story_id)
+                return story
+
+        window = PublisherWindow(StoryService(), object())
+        self.addCleanup(window.close)
+
+        self.assertEqual(window.story_list.item(0).text(), "待补封面（待上传封面）")
+        self.assertEqual(window.story_cover_edit.text(), "")
+        self.assertEqual(window.story_cover_edit.placeholderText(), "待上传封面")
+
     def test_confirmed_short_story_deletion_accepts_qt_button_value(self):
         class DeleteService(FakeService):
             def __init__(self):

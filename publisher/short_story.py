@@ -228,7 +228,7 @@ class ShortStoryConfig:
     story_id: str
     name: str
     source_path: Path
-    cover_path: Path
+    cover_path: Path | None
     primary_category: str
     extra_categories: tuple[str, ...] = ()
     ai_generated: bool = True
@@ -241,8 +241,6 @@ class ShortStoryConfig:
             raise ValueError("story_id must not be empty")
         if not self.name.strip():
             raise ValueError("name must not be empty")
-        if not self.primary_category.strip():
-            raise ValueError("primary_category must not be empty")
         if len((self.primary_category, *self.extra_categories)) > 8:
             raise ValueError("番茄短故事最多选择 8 个分类")
         if any(
@@ -256,7 +254,7 @@ class ShortStoryConfig:
             "story_id": self.story_id,
             "name": self.name,
             "source_path": str(self.source_path),
-            "cover_path": str(self.cover_path),
+            "cover_path": str(self.cover_path) if self.cover_path else "",
             "primary_category": self.primary_category,
             "extra_categories": list(self.extra_categories),
             "ai_generated": self.ai_generated,
@@ -280,7 +278,11 @@ class ShortStoryConfig:
             story_id=str(value["story_id"]),
             name=str(value["name"]),
             source_path=Path(str(value["source_path"])),
-            cover_path=Path(str(value["cover_path"])),
+            cover_path=(
+                Path(str(value["cover_path"]).strip())
+                if str(value.get("cover_path", "")).strip()
+                else None
+            ),
             primary_category=primary_category,
             extra_categories=extra_categories,
             ai_generated=bool(value.get("ai_generated", True)),
@@ -301,6 +303,20 @@ class ShortStoryDraft:
     source_path: Path
     source_files: tuple[Path, ...]
     character_count: int
+
+
+@dataclass(frozen=True)
+class ShortStoryBatchCandidate:
+    source_path: Path
+    draft: ShortStoryDraft
+    primary_category: str
+    extra_categories: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ShortStoryBatchScan:
+    candidates: tuple[ShortStoryBatchCandidate, ...]
+    rejected_paths: tuple[Path, ...]
 
 
 def suggest_short_story_categories(title: str, body: str) -> tuple[str, tuple[str, ...]]:
@@ -342,8 +358,38 @@ def _category_score(title: str, body: str, keywords: tuple[str, ...]) -> int:
 def validate_short_story_config(config: ShortStoryConfig) -> None:
     if not config.source_path.exists():
         raise ValueError(f"正文源文件不存在: {config.source_path}")
+    if config.cover_path is None:
+        raise ValueError("请先上传封面")
+    if not config.primary_category.strip():
+        raise ValueError("请先选择主分类")
     if not config.cover_path.exists():
         raise ValueError(f"封面文件不存在: {config.cover_path}")
+
+
+def scan_short_story_batch(root: Path) -> ShortStoryBatchScan:
+    source_root = _batch_source_root(root)
+    candidates: list[ShortStoryBatchCandidate] = []
+    rejected_paths: list[Path] = []
+
+    for source_path in _prefer_txt_duplicates(source_root):
+        try:
+            draft = scan_short_story_source(source_path)
+        except (OSError, ShortStoryParseError):
+            rejected_paths.append(source_path)
+            continue
+        primary_category, extra_categories = suggest_short_story_categories(
+            draft.title, draft.body
+        )
+        candidates.append(
+            ShortStoryBatchCandidate(
+                source_path=source_path,
+                draft=draft,
+                primary_category=primary_category,
+                extra_categories=extra_categories,
+            )
+        )
+
+    return ShortStoryBatchScan(tuple(candidates), tuple(rejected_paths))
 
 
 def scan_short_story_source(path: Path) -> ShortStoryDraft:
@@ -385,6 +431,31 @@ def _scan_supported_files(root: Path) -> list[Path]:
         if path.is_file() and path.suffix.lower() in {".txt", ".md"}
     ]
     return sorted(supported, key=lambda path: _natural_path_key(path.relative_to(root)))
+
+
+def _batch_source_root(root: Path) -> Path:
+    if not root.is_dir():
+        raise ShortStoryParseError(f"短故事目录不存在: {root}")
+    ordered_source = root / "发布顺序" / "源文件"
+    if ordered_source.is_dir():
+        return ordered_source
+    source_dir = root / "源文件"
+    return source_dir if source_dir.is_dir() else root
+
+
+def _prefer_txt_duplicates(root: Path) -> list[Path]:
+    selected: dict[Path, Path] = {}
+    for path in _scan_supported_files(root):
+        key = path.relative_to(root).with_suffix("")
+        previous = selected.get(key)
+        if previous is None or (
+            previous.suffix.lower() != ".txt" and path.suffix.lower() == ".txt"
+        ):
+            selected[key] = path
+    return sorted(
+        selected.values(),
+        key=lambda path: _natural_path_key(path.relative_to(root)),
+    )
 
 
 def _natural_path_key(path: Path) -> tuple[tuple[object, ...], ...]:

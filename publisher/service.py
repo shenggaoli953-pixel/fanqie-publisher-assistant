@@ -1,5 +1,6 @@
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
+from pathlib import Path
 import secrets
 
 from publisher.chapters import contiguous_chapters, scan_chapters
@@ -14,7 +15,14 @@ from publisher.models import (
 )
 from publisher.planner import build_schedule
 from publisher.repository import JsonRepository
-from publisher.short_story import ShortStoryConfig
+from publisher.short_story import ShortStoryConfig, scan_short_story_batch
+
+
+@dataclass(frozen=True)
+class ShortStoryImportReport:
+    imported_names: tuple[str, ...]
+    skipped_names: tuple[str, ...]
+    rejected_paths: tuple[Path, ...]
 
 
 class PublishingService:
@@ -59,6 +67,42 @@ class PublishingService:
         if any(story.story_id == config.story_id for story in stories):
             raise ValueError(f"短故事已存在: {config.story_id}")
         self._repository.save_short_stories([*stories, config])
+
+    def import_short_story_folder(self, root: Path) -> ShortStoryImportReport:
+        scan = scan_short_story_batch(root)
+        stories = self._repository.load_short_stories()
+        known_paths = {story.source_path.resolve() for story in stories}
+        known_names = {story.name.casefold() for story in stories}
+        imported_names: list[str] = []
+        skipped_names: list[str] = []
+
+        for candidate in scan.candidates:
+            source_path = candidate.source_path.resolve()
+            name = candidate.draft.title
+            if source_path in known_paths or name.casefold() in known_names:
+                skipped_names.append(name)
+                continue
+            stories.append(
+                ShortStoryConfig(
+                    story_id=secrets.token_hex(16),
+                    name=name,
+                    source_path=candidate.source_path,
+                    cover_path=None,
+                    primary_category=candidate.primary_category,
+                    extra_categories=candidate.extra_categories,
+                )
+            )
+            imported_names.append(name)
+            known_paths.add(source_path)
+            known_names.add(name.casefold())
+
+        if imported_names:
+            self._repository.save_short_stories(stories)
+        return ShortStoryImportReport(
+            tuple(imported_names),
+            tuple(skipped_names),
+            scan.rejected_paths,
+        )
 
     def get_short_story(self, story_id: str) -> ShortStoryConfig:
         for story in self._repository.load_short_stories():

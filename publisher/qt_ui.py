@@ -324,6 +324,9 @@ class PublisherWindow(QMainWindow):
         self.new_story_button = QPushButton("新建短故事", story_panel)
         self.new_story_button.clicked.connect(self._new_story)
         story_layout.addWidget(self.new_story_button)
+        self.import_story_folder_button = QPushButton("批量导入文件夹", story_panel)
+        self.import_story_folder_button.clicked.connect(self._import_short_story_folder)
+        story_layout.addWidget(self.import_story_folder_button)
 
         self.story_editor_panel = QWidget(self.story_splitter)
         panel_layout = QVBoxLayout(self.story_editor_panel)
@@ -385,6 +388,7 @@ class PublisherWindow(QMainWindow):
         source_dir_button.clicked.connect(self._choose_story_source_directory)
         source_layout.addWidget(source_dir_button)
         self.story_cover_edit = QLineEdit(section)
+        self.story_cover_edit.setPlaceholderText("待上传封面")
         cover_row = QWidget(section)
         cover_layout = QHBoxLayout(cover_row)
         cover_layout.setContentsMargins(0, 0, 0, 0)
@@ -486,7 +490,10 @@ class PublisherWindow(QMainWindow):
         self.story_list.blockSignals(True)
         self.story_list.clear()
         for story in self._stories:
-            self.story_list.addItem(story.name)
+            label = story.name
+            if story.cover_path is None:
+                label += "（待上传封面）"
+            self.story_list.addItem(label)
         self.story_list.blockSignals(False)
         if self._stories and self._selected_story_id is None:
             self.story_list.setCurrentRow(0)
@@ -504,7 +511,10 @@ class PublisherWindow(QMainWindow):
         self._selected_story_id = story_id
         self.story_name_edit.setText(story.name)
         self.story_source_edit.setText(str(story.source_path))
-        self.story_cover_edit.setText(str(story.cover_path))
+        self.story_cover_edit.setText(str(story.cover_path) if story.cover_path else "")
+        self.story_cover_edit.setPlaceholderText(
+            "待上传封面" if story.cover_path is None else ""
+        )
         self.story_primary_category_box.setCurrentText(story.primary_category)
         self.set_story_extra_categories(story.extra_categories)
         self.story_ai_box.setChecked(story.ai_generated)
@@ -564,6 +574,28 @@ class PublisherWindow(QMainWindow):
         if selected:
             self.story_source_edit.setText(selected)
             self.update_story_preview()
+
+    def _import_short_story_folder(self) -> None:
+        if self._task_running:
+            self.set_task_status("任务运行中，暂不能批量导入")
+            return
+        selected = QFileDialog.getExistingDirectory(self, "选择短故事总文件夹")
+        if not selected:
+            return
+        try:
+            report = self._service.import_short_story_folder(Path(selected))
+        except (OSError, ValueError) as error:
+            QMessageBox.critical(self, "批量导入失败", str(error))
+            return
+        self._selected_story_id = None
+        self.refresh_short_stories()
+        message = (
+            f"已导入 {len(report.imported_names)} 篇；"
+            f"已跳过 {len(report.skipped_names)} 篇；"
+            f"无法读取 {len(report.rejected_paths)} 篇。"
+        )
+        self.set_task_status(message)
+        QMessageBox.information(self, "批量导入完成", message)
 
     def _choose_story_cover(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(
@@ -650,11 +682,12 @@ class PublisherWindow(QMainWindow):
         if self._selected_story_id is not None:
             old = self._service.get_short_story(story_id)
         try:
+            cover_text = self.story_cover_edit.text().strip()
             config = ShortStoryConfig(
                 story_id=story_id,
                 name=self.story_name_edit.text().strip(),
                 source_path=Path(self.story_source_edit.text().strip()),
-                cover_path=Path(self.story_cover_edit.text().strip()),
+                cover_path=Path(cover_text) if cover_text else None,
                 primary_category=self.story_primary_category_box.currentText().strip(),
                 extra_categories=self._story_extra_categories,
                 ai_generated=self.story_ai_box.isChecked(),
@@ -702,8 +735,22 @@ class PublisherWindow(QMainWindow):
             elif report.success:
                 if report.submitted_names:
                     count = len(report.submitted_names)
-                    self.set_task_status(f"短故事发布完成，共提交 {count} 篇")
-                    QMessageBox.information(self, "发布完成", f"已连续提交 {count} 篇短故事。")
+                    pending = len(report.pending_setup_names)
+                    suffix = f"；待补充设置 {pending} 篇" if pending else ""
+                    self.set_task_status(f"短故事发布完成，共提交 {count} 篇{suffix}")
+                    QMessageBox.information(
+                        self,
+                        "发布完成",
+                        f"已连续提交 {count} 篇短故事。{suffix}",
+                    )
+                elif report.pending_setup_names:
+                    count = len(report.pending_setup_names)
+                    self.set_task_status(f"有 {count} 篇短故事待补充设置")
+                    QMessageBox.information(
+                        self,
+                        "待补充设置",
+                        f"有 {count} 篇短故事尚未上传封面或选择主分类。",
+                    )
                 else:
                     self.set_task_status("短故事后台已是最新状态")
             elif report.requires_user_action:
@@ -1210,6 +1257,7 @@ class PublisherWindow(QMainWindow):
             self.story_publish_button,
             self.story_save_button,
             self.story_open_edge_button,
+            self.import_story_folder_button,
             self.delete_story_button,
             self.delete_book_button,
             self.update_action,

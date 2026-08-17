@@ -7,6 +7,14 @@ from publisher.application import ApplicationContext
 
 
 class MainTests(unittest.TestCase):
+    def test_readme_describes_batch_short_story_import(self):
+        readme = Path(__file__).parents[1] / "README.md"
+
+        text = readme.read_text(encoding="utf-8")
+
+        self.assertIn("批量导入", text)
+        self.assertIn("待上传封面", text)
+
     def test_build_script_propagates_pyinstaller_failures(self):
         build_script = Path(__file__).parents[1] / "build.ps1"
 

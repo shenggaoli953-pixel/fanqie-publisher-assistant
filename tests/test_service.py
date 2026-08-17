@@ -95,6 +95,28 @@ class ServiceTests(unittest.TestCase):
             "https://fanqienovel.com/main/writer/publish-short/123",
         )
 
+    def test_import_short_story_folder_adds_only_new_txt_sources_in_order(self):
+        source = self.root / "番茄短故事" / "发布顺序" / "源文件"
+        source.mkdir(parents=True)
+        (source / "10_后导入.txt").write_text("普通故事正文", encoding="utf-8")
+        (source / "2_中间导入.txt").write_text("普通故事正文", encoding="utf-8")
+        (source / "1_先导入.txt").write_text("普通故事正文", encoding="utf-8")
+
+        first = self.service.import_short_story_folder(source.parents[1])
+        second = self.service.import_short_story_folder(source.parents[1])
+
+        self.assertEqual(
+            first.imported_names,
+            ("1_先导入", "2_中间导入", "10_后导入"),
+        )
+        self.assertEqual(second.imported_names, ())
+        self.assertEqual(second.skipped_names, first.imported_names)
+        self.assertEqual(
+            [story.name for story in self.service.list_short_stories()],
+            list(first.imported_names),
+        )
+        self.assertTrue(all(story.cover_path is None for story in self.service.list_short_stories()))
+
     def test_delete_short_story_keeps_its_local_source_file(self):
         source_path = self.root / "夜航.txt"
         source_path.write_text("短故事正文", encoding="utf-8")

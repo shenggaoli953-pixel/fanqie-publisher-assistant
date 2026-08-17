@@ -65,6 +65,7 @@ class ShortStoryRunReport:
 class ShortStoryQueueReport:
     submitted_names: tuple[str, ...]
     skipped_names: tuple[str, ...]
+    pending_setup_names: tuple[str, ...] = ()
     failed_name: str | None = None
     error: str | None = None
     requires_user_action: bool = False
@@ -586,6 +587,7 @@ def publish_all_short_stories(
     published_titles = publisher.published_titles()
     submitted: list[str] = []
     skipped: list[str] = []
+    pending_setup: list[str] = []
 
     for config in service.list_short_stories():
         if control is not None and control.stop_requested():
@@ -595,6 +597,9 @@ def publish_all_short_stories(
             )
         if config.name in published_titles:
             skipped.append(config.name)
+            continue
+        if config.cover_path is None or not config.primary_category.strip():
+            pending_setup.append(config.name)
             continue
         progress(f"正在发布短故事：{config.name}")
         report = publish_short_story(
@@ -615,4 +620,8 @@ def publish_all_short_stories(
             requires_user_action=report.requires_user_action,
         )
 
-    return ShortStoryQueueReport(tuple(submitted), tuple(skipped))
+    return ShortStoryQueueReport(
+        tuple(submitted),
+        tuple(skipped),
+        pending_setup_names=tuple(pending_setup),
+    )

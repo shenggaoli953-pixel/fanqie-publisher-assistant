@@ -6,6 +6,7 @@ from publisher.repository import JsonRepository
 from publisher.short_story import (
     ShortStoryConfig,
     ShortStoryParseError,
+    scan_short_story_batch,
     scan_short_story_source,
     suggest_short_story_categories,
     validate_short_story_config,
@@ -120,6 +121,37 @@ class ShortStoryTests(unittest.TestCase):
         )
         self.assertEqual(draft.body, "开场\n\n尾声\n\n补遗")
 
+    def test_batch_scan_prefers_source_txt_order_over_markdown_copies(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "番茄短故事"
+            source = root / "发布顺序" / "源文件"
+            markdown = root / "发布顺序" / "Markdown"
+            source.mkdir(parents=True)
+            markdown.mkdir(parents=True)
+            for name in ("10_十.txt", "2_二.txt", "1_一.txt"):
+                (source / name).write_text("正文", encoding="utf-8")
+            for name in ("1_一.md", "2_二.md", "10_十.md"):
+                (markdown / name).write_text("# 重复副本\n\n正文", encoding="utf-8")
+
+            scan = scan_short_story_batch(root)
+
+        self.assertEqual(
+            [item.source_path.name for item in scan.candidates],
+            ["1_一.txt", "2_二.txt", "10_十.txt"],
+        )
+        self.assertEqual(scan.rejected_paths, ())
+
+    def test_batch_scan_keeps_reading_after_one_invalid_file(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "01_有效.txt").write_text("正文", encoding="utf-8")
+            (root / "02_空白.txt").write_text("\n", encoding="utf-8")
+
+            scan = scan_short_story_batch(root)
+
+        self.assertEqual([item.draft.title for item in scan.candidates], ["01_有效"])
+        self.assertEqual([item.name for item in scan.rejected_paths], ["02_空白.txt"])
+
     def test_scan_supports_gb18030_encoded_sources(self):
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "桂花.txt"
@@ -221,6 +253,34 @@ class ShortStoryTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "封面文件不存在"):
                 validate_short_story_config(config)
+
+    def test_validation_requires_pending_cover_and_primary_category(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "待补封面.txt"
+            cover = root / "cover.jpg"
+            source.write_text("正文", encoding="utf-8")
+            cover.write_bytes(b"jpg")
+
+            missing_cover = self._build_config(
+                story_id="pending-cover",
+                name="待补封面",
+                source_path=source,
+                cover_path=None,
+                primary_category="",
+            )
+            missing_category = self._build_config(
+                story_id="pending-category",
+                name="待补分类",
+                source_path=source,
+                cover_path=cover,
+                primary_category="",
+            )
+
+            with self.assertRaisesRegex(ValueError, "请先上传封面"):
+                validate_short_story_config(missing_cover)
+            with self.assertRaisesRegex(ValueError, "请先选择主分类"):
+                validate_short_story_config(missing_category)
 
     def test_repository_round_trip_uses_defaults_for_old_short_story_data(self):
         with TemporaryDirectory() as temp_dir:

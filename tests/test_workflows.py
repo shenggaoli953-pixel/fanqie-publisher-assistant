@@ -569,6 +569,57 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(report.submitted_names, ("待发布甲", "待发布乙"))
         self.assertEqual(Publisher.submitted, ["待发布甲", "待发布乙"])
 
+    def test_short_story_queue_skips_stories_waiting_for_cover_or_category(self):
+        stories = [
+            ShortStoryConfig(
+                story_id="pending",
+                name="待补封面",
+                source_path=Path("pending.txt"),
+                cover_path=None,
+                primary_category="",
+            ),
+            ShortStoryConfig(
+                story_id="ready",
+                name="可发布",
+                source_path=Path("ready.txt"),
+                cover_path=Path("cover.png"),
+                primary_category="其他",
+                consent_confirmed=True,
+            ),
+        ]
+
+        class Service:
+            def list_short_stories(self):
+                return stories
+
+            def get_short_story(self, story_id: str):
+                return next(story for story in stories if story.story_id == story_id)
+
+            def update_short_story(self, _story) -> None:
+                pass
+
+        class Publisher:
+            submitted: list[str] = []
+
+            def __init__(self, _gateway) -> None:
+                pass
+
+            def published_titles(self):
+                return set()
+
+            def submit(self, config):
+                self.submitted.append(config.name)
+                return ShortStorySubmissionResult(True)
+
+        report = publish_all_short_stories(
+            Service(), object(), publisher_factory=Publisher
+        )
+
+        self.assertTrue(report.success)
+        self.assertEqual(report.pending_setup_names, ("待补封面",))
+        self.assertEqual(report.submitted_names, ("可发布",))
+        self.assertEqual(Publisher.submitted, ["可发布"])
+
     def test_short_story_queue_stops_on_the_first_failed_story(self):
         stories = [
             ShortStoryConfig(
